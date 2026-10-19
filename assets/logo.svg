@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="512" height="512" role="img" aria-label="PlanCraft">
   <title>PlanCraft</title>
-  <!-- Deep-blue tile -->
-  <rect x="0" y="0" width="100" height="100" rx="22" fill="#1B3A8C"/>
+  <!-- Green tile (matches the ribbon accent) -->
+  <rect x="0" y="0" width="100" height="100" rx="22" fill="#2B6E30"/>
   <!-- Dependency elbows -->
   <g stroke="#FFFFFF" stroke-opacity="0.67" stroke-width="2.5" fill="none" stroke-linecap="round">
     <path d="M53 28.5 H58 V44.5"/>

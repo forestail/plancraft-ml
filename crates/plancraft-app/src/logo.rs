@@ -12,6 +12,9 @@ use crate::theme;
 const BARS: [(f32, f32, f32, f32); 3] = [(0.17, 0.23, 0.53, 0.34), (0.31, 0.445, 0.71, 0.555), (0.45, 0.66, 0.64, 0.77)];
 const DIAMOND: (f32, f32, f32) = (0.785, 0.715, 0.105);
 const TILE_RADIUS: f32 = 0.22;
+/// Fixed icon colours: the app icon must not change with the UI theme.
+const ICON_TILE: Color32 = Color32::from_rgb(0x2B, 0x6E, 0x30);
+const ICON_GOLD: Color32 = Color32::from_rgb(0xF2, 0xB1, 0x1C);
 const BAR_RADIUS: f32 = 0.045;
 
 /// Paints the mark into `rect` (should be square).
@@ -51,8 +54,8 @@ fn rounded_rect_contains(x: f32, y: f32, x0: f32, y0: f32, x1: f32, y1: f32, r: 
 pub fn rasterize(size: u32) -> Vec<u8> {
     const SS: u32 = 4;
     let mut out = vec![0u8; (size * size * 4) as usize];
-    let accent = theme::pal().ACCENT;
-    let gold = theme::pal().GOLD;
+    let accent = ICON_TILE;
+    let gold = ICON_GOLD;
     for py in 0..size {
         for px in 0..size {
             let (mut r, mut g, mut b, mut a) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
