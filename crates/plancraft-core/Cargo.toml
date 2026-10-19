@@ -1,0 +1,24 @@
+[package]
+name = "plancraft-core"
+description = "PlanCraft project model, calendar math, scheduling engine and workload analysis"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+thiserror.workspace = true
+quick-xml = "0.42"
+calamine = { version = "0.37.0", default-features = false }
+
+[dev-dependencies]
+proptest = "1"
+tempfile = "3"
+
+[lints]
+workspace = true
