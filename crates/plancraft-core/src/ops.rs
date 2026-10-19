@@ -850,6 +850,7 @@ impl Project {
         if pct == 0 {
             t.actual_start = None;
             t.actual_finish = None;
+            t.resume = None;
         } else {
             if t.actual_start.is_none() {
                 t.actual_start = t.sched.start;

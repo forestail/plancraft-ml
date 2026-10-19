@@ -222,7 +222,11 @@ impl ResourceInfo {
                         });
                     }
                     Tab::Notes => {
-                        ui.add(egui::TextEdit::multiline(&mut r.notes).desired_rows(12).desired_width(f32::INFINITY));
+                        ui.add(egui::TextEdit::multiline(&mut r.notes).desired_rows(10).desired_width(f32::INFINITY));
+                        ui.add_space(6.0);
+                        if let Some(m) = super::extra::attachments_ui(ui, &mut r.attachments, "resource") {
+                            self.error = Some(m);
+                        }
                     }
                 }
                 if let Some(e) = &self.error {

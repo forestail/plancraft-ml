@@ -19,6 +19,7 @@ pub struct Dialogs {
     pub external: Option<misc::ExternalLinks>,
     pub recurring: Option<extra::RecurringTask>,
     pub baseline: Option<extra::BaselineDialog>,
+    pub update_project: Option<extra::UpdateProjectDialog>,
     pub wbs: Option<extra::WbsDialog>,
     pub hyperlink: Option<extra::HyperlinkDialog>,
     pub reports: Option<reports::ReportsWindow>,

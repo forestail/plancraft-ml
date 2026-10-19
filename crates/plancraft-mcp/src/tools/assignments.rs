@@ -8,7 +8,7 @@ use super::*;
 use crate::args::*;
 use crate::views;
 
-const CONTOURS: [&str; 4] = ["flat", "front_loaded", "back_loaded", "bell"];
+const CONTOURS: [&str; 8] = ["flat", "back_loaded", "front_loaded", "double_peak", "early_peak", "late_peak", "bell", "turtle"];
 
 fn assignment_selector() -> Value {
     json!({

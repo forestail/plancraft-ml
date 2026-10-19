@@ -15,6 +15,7 @@
 //! assert!(p.task(b).unwrap().sched.start > p.task(a).unwrap().sched.start);
 //! ```
 
+pub mod attach;
 pub mod calendar;
 pub mod duration;
 pub mod extras;

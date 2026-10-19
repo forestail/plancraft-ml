@@ -502,6 +502,14 @@ fn ribbon(ui: &mut Ui, st: &mut UiState, info: &MenuInfo, settings: &AppSettings
         MenuTab::Report => {
             group(ui, crate::tr("View Reports"), |ui| {
                 bg(ui, "🗠", crate::tr("Reports…"), crate::tr("Reports and analysis"), doc, Command::Reports);
+                bg(
+                    ui,
+                    "🛠",
+                    crate::tr("New Report"),
+                    crate::tr("Custom report: choose the table, filter, sort order and assignment details"),
+                    doc,
+                    Command::CustomReport,
+                );
                 bg(ui, "📊", crate::tr("Statistics"), crate::tr("Project statistics, variance and earned value"), doc, Command::Statistics);
                 stack(ui, |ui| {
                     sm(ui, "♦", crate::tr("Milestones"), crate::tr("Milestone status report"), doc, Command::SetView(ViewKind::Milestones));
@@ -570,6 +578,26 @@ fn ribbon(ui: &mut Ui, st: &mut UiState, info: &MenuInfo, settings: &AppSettings
                 );
                 stack(ui, |ui| {
                     sm(ui, "✖", crate::tr("Clear Baseline"), crate::tr("Clear the baseline"), doc, Command::BaselineDialog(true));
+                });
+            });
+            group(ui, crate::tr("Status"), |ui| {
+                bg(
+                    ui,
+                    "🔄",
+                    crate::tr("Update Project"),
+                    crate::tr("Mark work complete through a date, or move unfinished work after a date"),
+                    doc,
+                    Command::UpdateProject,
+                );
+                stack(ui, |ui| {
+                    sm(
+                        ui,
+                        "✔",
+                        crate::tr("On Track"),
+                        crate::tr("Set progress to where the schedule says it should be today"),
+                        sel,
+                        Command::MarkOnTrack,
+                    );
                 });
             });
             group(ui, crate::tr("AI Agents"), |ui| {
@@ -683,8 +711,28 @@ fn ribbon(ui: &mut Ui, st: &mut UiState, info: &MenuInfo, settings: &AppSettings
                             ui.add_sized([140.0, BUTTON_H], egui::TextEdit::singleline(&mut st.filter_value).hint_text("0"));
                         });
                     }
+                });
+                stack(ui, |ui| {
+                    labeled_combo(ui, "", crate::tr("Group by"), |ui| {
+                        if st.view == ViewKind::ResourceSheet {
+                            egui::ComboBox::from_id_salt("tb_group_res").width(130.0).selected_text(st.resource_group.label()).show_ui(
+                                ui,
+                                |ui| {
+                                    for g in crate::state::ResourceGroup::ALL {
+                                        ui.selectable_value(&mut st.resource_group, g, g.label());
+                                    }
+                                },
+                            );
+                        } else {
+                            egui::ComboBox::from_id_salt("tb_group").width(130.0).selected_text(st.group.label()).show_ui(ui, |ui| {
+                                for g in crate::state::TaskGroup::ALL {
+                                    ui.selectable_value(&mut st.group, g, g.label());
+                                }
+                            });
+                        }
+                    });
                     labeled_combo(ui, "", crate::tr("Search"), |ui| {
-                        ui.add_sized([140.0, BUTTON_H], egui::TextEdit::singleline(&mut st.search).hint_text(crate::tr("🔍 Search tasks")));
+                        ui.add_sized([130.0, BUTTON_H], egui::TextEdit::singleline(&mut st.search).hint_text(crate::tr("🔍 Search tasks")));
                     });
                 });
             });

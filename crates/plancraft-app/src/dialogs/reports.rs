@@ -8,7 +8,9 @@ use plancraft_core::prelude::*;
 use plancraft_core::workload::Granularity;
 use plancraft_core::workspace::Document;
 
+use crate::columns::{self, CellCtx, TaskCol, TaskTable};
 use crate::format;
+use crate::state::TaskFilter;
 use crate::theme;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -25,10 +27,11 @@ pub enum ReportKind {
     WhoDoesWhat,
     OverallocatedResources,
     EarnedValue,
+    Custom,
 }
 
 impl ReportKind {
-    pub const ALL: [ReportKind; 11] = [
+    pub const ALL: [ReportKind; 12] = [
         ReportKind::ProjectOverview,
         ReportKind::UpcomingTasks,
         ReportKind::UnstartedTasks,
@@ -40,6 +43,7 @@ impl ReportKind {
         ReportKind::WhoDoesWhat,
         ReportKind::OverallocatedResources,
         ReportKind::EarnedValue,
+        ReportKind::Custom,
     ];
 
     pub fn label(self) -> &'static str {
@@ -55,6 +59,7 @@ impl ReportKind {
             ReportKind::WhoDoesWhat => crate::tr("Who Does What"),
             ReportKind::OverallocatedResources => crate::tr("Overallocated Resources"),
             ReportKind::EarnedValue => crate::tr("Earned Value Report"),
+            ReportKind::Custom => crate::tr("Custom Report…"),
         }
     }
 }
@@ -124,10 +129,236 @@ const TASK_HEADERS: [(&str, bool); 7] = [
     ("Resource Names", false),
 ];
 
+// ---------------------------------------------------------------------------
+// Custom report ("Report ▸ New Report ▸ Custom")
+// ---------------------------------------------------------------------------
+
+/// Sort order of a custom report.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum CustomSort {
+    #[default]
+    Id,
+    Name,
+    Start,
+    Finish,
+    Duration,
+    PercentComplete,
+    Work,
+    Cost,
+    Priority,
+}
+
+impl CustomSort {
+    pub const ALL: [CustomSort; 9] = [
+        CustomSort::Id,
+        CustomSort::Name,
+        CustomSort::Start,
+        CustomSort::Finish,
+        CustomSort::Duration,
+        CustomSort::PercentComplete,
+        CustomSort::Work,
+        CustomSort::Cost,
+        CustomSort::Priority,
+    ];
+    pub fn label(self) -> &'static str {
+        match self {
+            CustomSort::Id => crate::tr("ID"),
+            CustomSort::Name => crate::tr("Name"),
+            CustomSort::Start => crate::tr("Start"),
+            CustomSort::Finish => crate::tr("Finish"),
+            CustomSort::Duration => crate::tr("Duration"),
+            CustomSort::PercentComplete => crate::tr("% Complete"),
+            CustomSort::Work => crate::tr("Work"),
+            CustomSort::Cost => crate::tr("Cost"),
+            CustomSort::Priority => crate::tr("Priority"),
+        }
+    }
+}
+
+/// What a custom report shows: a task table, filtered and sorted, optionally with the
+/// assignments (resource, work, cost) under each task.
+#[derive(Clone, Debug)]
+pub struct CustomSpec {
+    pub title: String,
+    pub table: TaskTable,
+    pub filter: TaskFilter,
+    pub filter_value: String,
+    pub sort: CustomSort,
+    pub descending: bool,
+    pub summaries: bool,
+    pub assignments: bool,
+}
+
+impl Default for CustomSpec {
+    fn default() -> Self {
+        Self {
+            title: crate::tr("Custom Report").to_string(),
+            table: TaskTable::Entry,
+            filter: TaskFilter::All,
+            filter_value: String::new(),
+            sort: CustomSort::Id,
+            descending: false,
+            summaries: true,
+            assignments: false,
+        }
+    }
+}
+
+thread_local! {
+    /// The custom report last set up (kept while the program runs).
+    static LAST_SPEC: std::cell::RefCell<Option<CustomSpec>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Builds a custom report.
+pub fn build_custom(p: &Project, spec: &CustomSpec) -> ReportTable {
+    let mut cols: Vec<TaskCol> = spec.table.columns().into_iter().filter(|c| !matches!(c, TaskCol::Indicators | TaskCol::Mode)).collect();
+    if spec.assignments {
+        if !cols.contains(&TaskCol::Resources) && !cols.is_empty() {
+            let at = cols.iter().position(|c| *c == TaskCol::Name).map(|i| i + 1).unwrap_or(cols.len());
+            cols.insert(at.min(cols.len()), TaskCol::Resources);
+        }
+        for c in [TaskCol::Work, TaskCol::Cost] {
+            if !cols.contains(&c) {
+                cols.push(c);
+            }
+        }
+    }
+    let defs: Vec<_> = cols.iter().map(|c| c.def(p)).collect();
+    let mut t = ReportTable {
+        title: if spec.title.trim().is_empty() { crate::tr("Custom Report").to_string() } else { spec.title.trim().to_string() },
+        headers: defs.iter().map(|d| d.title.clone()).collect(),
+        right: defs.iter().map(|d| d.align == egui::Align::RIGHT).collect(),
+        rows: Vec::new(),
+        bold: Vec::new(),
+        cash: Vec::new(),
+        note: None,
+    };
+    let value = i18n::parse_f64(&spec.filter_value).unwrap_or(0.0);
+    let mut idxs: Vec<usize> = (0..p.tasks.len())
+        .filter(|&i| p.tasks.get(i).is_some_and(|task| crate::views::matches_filter(p, task, spec.filter, value)))
+        .filter(|&i| spec.summaries || !p.has_children(i))
+        .collect();
+    let key = |i: &usize| p.tasks.get(*i);
+    idxs.sort_by(|a, b| {
+        let (Some(x), Some(y)) = (key(a), key(b)) else { return std::cmp::Ordering::Equal };
+        let o = match spec.sort {
+            CustomSort::Id => a.cmp(b),
+            CustomSort::Name => x.name.to_lowercase().cmp(&y.name.to_lowercase()),
+            CustomSort::Start => x.sched.start.cmp(&y.sched.start),
+            CustomSort::Finish => x.sched.finish.cmp(&y.sched.finish),
+            CustomSort::Duration => x.sched.duration.cmp(&y.sched.duration),
+            CustomSort::PercentComplete => x.sched.percent_complete.total_cmp(&y.sched.percent_complete),
+            CustomSort::Work => x.sched.work.cmp(&y.sched.work),
+            CustomSort::Cost => x.sched.cost.total_cmp(&y.sched.cost),
+            CustomSort::Priority => x.priority.cmp(&y.priority),
+        };
+        let o = if spec.descending { o.reverse() } else { o };
+        o.then(a.cmp(b))
+    });
+    let no_over = |_: TaskId| false;
+    let ctx = CellCtx { overallocated: &no_over };
+    let (mut work_total, mut cost_total) = (0, 0.0);
+    for i in idxs {
+        let Some(task) = p.tasks.get(i) else { continue };
+        let summary = p.has_children(i);
+        t.push(cols.iter().map(|c| columns::cell(*c, p, i, &ctx).text).collect(), summary);
+        if !summary {
+            work_total += task.sched.work;
+            cost_total += task.sched.cost;
+        }
+        if spec.assignments && !summary {
+            for a in p.assignments_for_task(task.id) {
+                let Some(r) = p.resource(a.resource) else { continue };
+                let cost: f64 = extras::assignment_daily_cost(p, a).values().sum();
+                let row = cols
+                    .iter()
+                    .map(|c| match c {
+                        TaskCol::Name => format!("    ↳ {}", r.name),
+                        TaskCol::Resources => format!("{} ({})", r.name, format::units(a.units)),
+                        TaskCol::Work => {
+                            if r.kind == ResourceType::Work {
+                                plancraft_core::duration::format_work(a.work)
+                            } else {
+                                String::new()
+                            }
+                        }
+                        TaskCol::Cost => format::money(p, cost),
+                        TaskCol::Start => format::date(task.sched.start),
+                        TaskCol::Finish => format::date(task.sched.finish),
+                        _ => String::new(),
+                    })
+                    .collect();
+                t.push(row, false);
+            }
+        }
+    }
+    if !t.rows.is_empty() {
+        let row = cols
+            .iter()
+            .enumerate()
+            .map(|(k, c)| match c {
+                TaskCol::Work => plancraft_core::duration::format_work(work_total),
+                TaskCol::Cost => format::money(p, cost_total),
+                _ if k == 0 => crate::tr("Total").to_string(),
+                _ => String::new(),
+            })
+            .collect();
+        t.push(row, true);
+    }
+    let mut note = vec![crate::tr_dyn(&format!("Filter: {}", spec.filter.label()))];
+    note.push(crate::tr_dyn(&format!("Sorted by: {}", spec.sort.label())));
+    t.note = Some(note.join(" · "));
+    t
+}
+
+/// The custom report set-up panel.
+fn custom_editor(ui: &mut egui::Ui, spec: &mut CustomSpec) {
+    egui::CollapsingHeader::new(RichText::new(crate::tr("Report definition")).strong()).default_open(true).show(ui, |ui| {
+        egui::Grid::new("custom_rep").num_columns(4).spacing([10.0, 6.0]).show(ui, |ui| {
+            ui.label(crate::tr("Name:"));
+            ui.add(egui::TextEdit::singleline(&mut spec.title).desired_width(220.0));
+            ui.label(crate::tr("Table:"));
+            egui::ComboBox::from_id_salt("cr_table").width(180.0).selected_text(spec.table.label()).show_ui(ui, |ui| {
+                for tb in TaskTable::ALL {
+                    ui.selectable_value(&mut spec.table, tb, tb.label());
+                }
+            });
+            ui.end_row();
+            ui.label(crate::tr("Filter:"));
+            ui.horizontal(|ui| {
+                egui::ComboBox::from_id_salt("cr_filter").width(200.0).selected_text(spec.filter.label()).show_ui(ui, |ui| {
+                    for f in TaskFilter::ALL {
+                        ui.selectable_value(&mut spec.filter, f, f.label());
+                    }
+                });
+                if spec.filter.needs_value() {
+                    ui.add(egui::TextEdit::singleline(&mut spec.filter_value).desired_width(60.0).hint_text("0"));
+                }
+            });
+            ui.label(crate::tr("Sort by:"));
+            ui.horizontal(|ui| {
+                egui::ComboBox::from_id_salt("cr_sort").width(140.0).selected_text(spec.sort.label()).show_ui(ui, |ui| {
+                    for k in CustomSort::ALL {
+                        ui.selectable_value(&mut spec.sort, k, k.label());
+                    }
+                });
+                ui.checkbox(&mut spec.descending, crate::tr("Descending"));
+            });
+            ui.end_row();
+            ui.label("");
+            ui.checkbox(&mut spec.summaries, crate::tr("Show summary tasks"));
+            ui.label("");
+            ui.checkbox(&mut spec.assignments, crate::tr("Details: assignments (work and cost)"));
+            ui.end_row();
+        });
+    });
+}
+
 /// Builds the data of a report.
 pub fn build(p: &Project, kind: ReportKind, g: Granularity, days: i64) -> ReportTable {
     let money = |v: f64| format::money(p, v);
     match kind {
+        ReportKind::Custom => build_custom(p, &CustomSpec::default()),
         ReportKind::ProjectOverview => {
             let s = plancraft_core::report::project_stats(p);
             let mut t = ReportTable::new(kind.label(), &[("Name", false), ("Total", true)]);
@@ -467,11 +698,13 @@ pub struct ReportsWindow {
     gran: Granularity,
     days: String,
     status: Option<String>,
+    pub custom: CustomSpec,
 }
 
 impl Default for ReportsWindow {
     fn default() -> Self {
-        Self { kind: ReportKind::ProjectOverview, gran: Granularity::Week, days: "14".into(), status: None }
+        let custom = LAST_SPEC.with(|s| s.borrow().clone()).unwrap_or_default();
+        Self { kind: ReportKind::ProjectOverview, gran: Granularity::Week, days: "14".into(), status: None, custom }
     }
 }
 
@@ -503,8 +736,14 @@ impl ReportsWindow {
                         ui.add(egui::TextEdit::singleline(&mut self.days).desired_width(40.0));
                     }
                 });
+                if self.kind == ReportKind::Custom {
+                    custom_editor(ui, &mut self.custom);
+                    let spec = self.custom.clone();
+                    LAST_SPEC.with(|s| *s.borrow_mut() = Some(spec));
+                }
                 let days: i64 = self.days.trim().parse().unwrap_or(14);
-                let table = build(p, self.kind, self.gran, days);
+                let table =
+                    if self.kind == ReportKind::Custom { build_custom(p, &self.custom) } else { build(p, self.kind, self.gran, days) };
                 ui.horizontal(|ui| {
                     if ui.button(crate::tr("Export HTML…")).on_hover_text(crate::tr("Publish the report as a web page")).clicked()
                         && let Some(path) = rfd::FileDialog::new()
@@ -548,17 +787,29 @@ impl ReportsWindow {
                         ui.label(RichText::new(crate::tr("No tasks match this report.")).color(theme::pal().TEXT_WEAK));
                         return;
                     }
+                    // Width of right-aligned columns: the longest text in them (≈7 px per character).
+                    let widths: Vec<f32> = (0..table.headers.len())
+                        .map(|c| {
+                            let longest = std::iter::once(table.headers.get(c))
+                                .chain(table.rows.iter().map(|r| r.get(c)))
+                                .flatten()
+                                .map(|t| t.chars().count())
+                                .max()
+                                .unwrap_or(4);
+                            (longest as f32 * 7.2 + 6.0).max(40.0)
+                        })
+                        .collect();
                     egui::Grid::new("rep_grid").striped(true).num_columns(table.headers.len()).spacing([18.0, 4.0]).show(ui, |ui| {
                         for h in &table.headers {
                             ui.label(RichText::new(h).strong().color(theme::pal().ACCENT_MID));
                         }
                         ui.end_row();
                         for (row, bold) in table.rows.iter().zip(&table.bold) {
-                            for (c, right) in row.iter().zip(&table.right) {
+                            for (k, (c, right)) in row.iter().zip(&table.right).enumerate() {
                                 let text = if *bold { RichText::new(c).strong() } else { RichText::new(c) };
                                 if *right {
                                     ui.allocate_ui_with_layout(
-                                        egui::vec2(110.0, 18.0),
+                                        egui::vec2(widths.get(k).copied().unwrap_or(110.0), 18.0),
                                         egui::Layout::right_to_left(egui::Align::Center),
                                         |ui| ui.label(text),
                                     );
@@ -619,6 +870,32 @@ mod tests {
             assert!(t.rows.iter().all(|r| r.len() == t.headers.len()), "{k:?}");
             assert!(to_html(&p, &t).contains("<table>"));
             assert!(to_csv(&t).lines().count() >= 1);
+        }
+    }
+
+    #[test]
+    fn custom_report_filters_sorts_and_lists_assignments() {
+        let p = plancraft_core::sample::demo_project(chrono::NaiveDate::from_ymd_opt(2026, 10, 5).unwrap());
+        let spec = CustomSpec {
+            filter: TaskFilter::InProgress,
+            sort: CustomSort::PercentComplete,
+            assignments: true,
+            summaries: false,
+            ..Default::default()
+        };
+        let t = build_custom(&p, &spec);
+        assert!(t.rows.iter().all(|r| r.len() == t.headers.len()));
+        let in_progress =
+            p.tasks.iter().enumerate().filter(|(i, x)| !p.has_children(*i) && x.percent_complete > 0 && x.percent_complete < 100).count();
+        let task_rows = t.rows.iter().filter(|r| !r.iter().any(|c| c.contains('↳'))).count();
+        assert_eq!(task_rows, in_progress + 1, "{:?}", t.rows);
+        assert!(t.rows.iter().any(|r| r.iter().any(|c| c.contains('↳'))));
+        assert!(t.headers.len() >= 4);
+        for s in CustomSort::ALL {
+            for tb in TaskTable::ALL {
+                let t = build_custom(&p, &CustomSpec { sort: s, table: tb, assignments: true, ..Default::default() });
+                assert!(t.rows.iter().all(|r| r.len() == t.headers.len()));
+            }
         }
     }
 }

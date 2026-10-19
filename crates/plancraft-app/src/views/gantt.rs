@@ -32,6 +32,10 @@ pub fn task_table(
     let over_res: HashSet<ResourceId> = plancraft_core::workload::overallocations(&doc.project).into_iter().map(|(r, _)| r).collect();
     let over_tasks = super::overallocated_tasks(&doc.project, &over_res);
     let blank = if st.filter == crate::state::TaskFilter::All && st.search.is_empty() { BLANK_ROWS } else { 0 };
+    let row_label = |r: usize| match rows.get(r) {
+        Some(&i) if i < doc.project.tasks.len() => (i + 1).to_string(),
+        _ => String::new(),
+    };
     let cfg = GridConfig {
         id: egui::Id::new(("task_grid", st.table.label())),
         columns: &defs,
@@ -41,6 +45,7 @@ pub fn task_table(
         show_vscroll,
         header_height: theme::HEADER_HEIGHT,
         row_height: theme::ROW_HEIGHT,
+        row_label: Some(&row_label),
     };
     let output = {
         let p = &doc.project;
@@ -51,6 +56,9 @@ pub fn task_table(
         let is_selected = |r: usize| super::task_at(p, rows, r).is_some_and(|t| sel.tasks.contains(&t.id));
         let mut cell = |r: usize, c: usize| {
             let (Some(&idx), Some(&col)) = (rows.get(r), cols.get(c)) else { return grid::Cell::default() };
+            if let Some(h) = super::group_header(idx) {
+                return group_cell(p, &h, col, !st.collapsed_groups.contains(&h.label));
+            }
             let mut cell = columns::cell(col, p, idx, &ctx);
             if col == TaskCol::Name && cell.expander.is_some() {
                 cell.expander = Some(!p.tasks.get(idx).is_some_and(|t| collapsed.contains(&t.id)));
@@ -71,6 +79,12 @@ pub fn task_table(
                 out.push(Command::TaskInfo);
             }
             GridEvent::ToggleExpand(row) => {
+                if let Some(h) = rows.get(row).and_then(|&i| super::group_header(i)) {
+                    if !st.collapsed_groups.remove(&h.label) {
+                        st.collapsed_groups.insert(h.label);
+                    }
+                    continue;
+                }
                 let Some(id) = super::task_at(&doc.project, rows, row).map(|t| t.id) else { continue };
                 if !st.collapsed.remove(&id) {
                     st.collapsed.insert(id);
@@ -109,6 +123,26 @@ pub fn task_table(
         }
     }
     output
+}
+
+/// A group header row ("Group by"): the group name and the totals of its tasks.
+fn group_cell(p: &Project, h: &super::GroupHeader, col: TaskCol, expanded: bool) -> grid::Cell {
+    let text = match col {
+        TaskCol::Name => format!("{}  ({})", h.label, h.tasks),
+        TaskCol::Start => crate::format::date(h.start),
+        TaskCol::Finish => crate::format::date(h.finish),
+        TaskCol::Cost => crate::format::money(p, h.cost),
+        TaskCol::Work => plancraft_core::duration::format_work(h.work),
+        TaskCol::PercentComplete => crate::format::percent(h.percent),
+        _ => String::new(),
+    };
+    grid::Cell {
+        text,
+        bold: true,
+        bg: Some(theme::pal().HEADER_BG),
+        expander: (col == TaskCol::Name).then_some(expanded),
+        ..Default::default()
+    }
 }
 
 fn st_context_menu(ui: &Ui, pos: egui::Pos2) {

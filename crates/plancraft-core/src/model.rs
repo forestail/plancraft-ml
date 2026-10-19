@@ -399,6 +399,12 @@ pub struct Task {
     /// Set on the summary task created by "Recurring Task".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recurrence: Option<Recurrence>,
+    /// Files embedded in the notes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<crate::attach::Attachment>,
+    /// "Update Project ▸ Reschedule uncompleted work": the unfinished part resumes here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resume: Option<NaiveDateTime>,
     #[serde(default)]
     pub sched: TaskSchedule,
 }
@@ -451,6 +457,8 @@ impl Task {
             baselines: BTreeMap::new(),
             interim: BTreeMap::new(),
             recurrence: None,
+            attachments: Vec::new(),
+            resume: None,
             sched: TaskSchedule::default(),
         }
     }
@@ -591,6 +599,9 @@ pub struct Resource {
     /// When the resource's cost is incurred.
     #[serde(default, skip_serializing_if = "Accrual::is_default")]
     pub accrue_at: Accrual,
+    /// Files embedded in the notes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<crate::attach::Attachment>,
 }
 
 impl Resource {
@@ -615,6 +626,7 @@ impl Resource {
             exceptions: Vec::new(),
             notes: String::new(),
             accrue_at: Accrual::default(),
+            attachments: Vec::new(),
         }
     }
 
@@ -642,19 +654,61 @@ pub enum WorkContour {
     FrontLoaded,
     BackLoaded,
     Bell,
+    DoublePeak,
+    EarlyPeak,
+    LatePeak,
+    Turtle,
 }
 
 impl WorkContour {
-    pub const ALL: [WorkContour; 4] = [WorkContour::Flat, WorkContour::FrontLoaded, WorkContour::BackLoaded, WorkContour::Bell];
+    /// In Microsoft Project's order.
+    pub const ALL: [WorkContour; 8] = [
+        WorkContour::Flat,
+        WorkContour::BackLoaded,
+        WorkContour::FrontLoaded,
+        WorkContour::DoublePeak,
+        WorkContour::EarlyPeak,
+        WorkContour::LatePeak,
+        WorkContour::Bell,
+        WorkContour::Turtle,
+    ];
+
+    /// Microsoft Project's built-in contours: units (in %) for each tenth of the assignment.
+    pub fn profile(self) -> [f64; 10] {
+        match self {
+            WorkContour::Flat => [100.0; 10],
+            WorkContour::BackLoaded => [10.0, 15.0, 25.0, 50.0, 50.0, 75.0, 75.0, 100.0, 100.0, 100.0],
+            WorkContour::FrontLoaded => [100.0, 100.0, 100.0, 75.0, 75.0, 50.0, 50.0, 25.0, 15.0, 10.0],
+            WorkContour::DoublePeak => [25.0, 50.0, 100.0, 50.0, 25.0, 25.0, 50.0, 100.0, 50.0, 25.0],
+            WorkContour::EarlyPeak => [25.0, 50.0, 100.0, 100.0, 75.0, 50.0, 50.0, 25.0, 15.0, 10.0],
+            WorkContour::LatePeak => [10.0, 15.0, 25.0, 50.0, 50.0, 75.0, 100.0, 100.0, 50.0, 25.0],
+            WorkContour::Bell => [10.0, 20.0, 40.0, 80.0, 100.0, 100.0, 80.0, 40.0, 20.0, 10.0],
+            WorkContour::Turtle => [25.0, 50.0, 75.0, 100.0, 100.0, 100.0, 100.0, 75.0, 50.0, 25.0],
+        }
+    }
 
     /// Relative intensity at position `x` in `[0, 1]` across the assignment.
     pub fn weight(self, x: f64) -> f64 {
+        let i = ((x.clamp(0.0, 1.0) * 10.0) as usize).min(9);
+        self.profile().get(i).copied().unwrap_or(100.0) / 100.0
+    }
+
+    /// Code used by Microsoft Project XML (`WorkContour`).
+    pub fn mspdi_code(self) -> u8 {
         match self {
-            WorkContour::Flat => 1.0,
-            WorkContour::FrontLoaded => 1.75 - 1.5 * x,
-            WorkContour::BackLoaded => 0.25 + 1.5 * x,
-            WorkContour::Bell => 0.2 + 1.6 * (1.0 - (2.0 * x - 1.0).powi(2)),
+            WorkContour::Flat => 0,
+            WorkContour::BackLoaded => 1,
+            WorkContour::FrontLoaded => 2,
+            WorkContour::DoublePeak => 3,
+            WorkContour::EarlyPeak => 4,
+            WorkContour::LatePeak => 5,
+            WorkContour::Bell => 6,
+            WorkContour::Turtle => 7,
         }
+    }
+
+    pub fn from_mspdi_code(code: u8) -> WorkContour {
+        WorkContour::ALL.into_iter().find(|c| c.mspdi_code() == code).unwrap_or_default()
     }
 
     pub fn label(self) -> &'static str {
@@ -663,6 +717,10 @@ impl WorkContour {
             WorkContour::FrontLoaded => crate::i18n::tr("Front loaded"),
             WorkContour::BackLoaded => crate::i18n::tr("Back loaded"),
             WorkContour::Bell => crate::i18n::tr("Bell"),
+            WorkContour::DoublePeak => crate::i18n::tr("Double peak"),
+            WorkContour::EarlyPeak => crate::i18n::tr("Early peak"),
+            WorkContour::LatePeak => crate::i18n::tr("Late peak"),
+            WorkContour::Turtle => crate::i18n::tr("Turtle"),
         }
     }
 }
@@ -817,6 +875,9 @@ pub struct Project {
     pub company: String,
     #[serde(default)]
     pub notes: String,
+    /// Files embedded in the notes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<crate::attach::Attachment>,
     pub start: NaiveDateTime,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status_date: Option<NaiveDate>,
@@ -858,6 +919,7 @@ impl Project {
             manager: String::new(),
             company: String::new(),
             notes: String::new(),
+            attachments: Vec::new(),
             start: start_time,
             status_date: None,
             calendar: std_id,

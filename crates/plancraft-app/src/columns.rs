@@ -262,8 +262,8 @@ pub fn indicators(p: &Project, t: &Task, overallocated: &dyn Fn(TaskId) -> bool)
     {
         v.push(("🔗".into(), theme::pal().ACCENT_MID, crate::tr("Linked to a task in another project").into()));
     }
-    if !t.notes.is_empty() {
-        v.push(("📝".into(), theme::pal().TEXT_WEAK, t.notes.clone()));
+    if !t.notes.is_empty() || !t.attachments.is_empty() {
+        v.push(("📝".into(), theme::pal().TEXT_WEAK, note_tooltip(&t.notes, &t.attachments)));
     }
     if !t.active {
         v.push(("⏸".into(), theme::pal().TEXT_WEAK, crate::tr("Inactive task").into()));
@@ -640,4 +640,16 @@ fn outline_number(p: &Project, idx: usize) -> String {
 /// Late-task check used by filters and indicators.
 pub fn is_late(p: &Project, t: &Task) -> bool {
     report::is_late(t, report::status_moment(p), p)
+}
+
+/// Tooltip of the notes indicator: the note text and the names of embedded files.
+pub fn note_tooltip(notes: &str, files: &[plancraft_core::attach::Attachment]) -> String {
+    let mut s = notes.to_string();
+    for a in files {
+        if !s.is_empty() {
+            s.push('\n');
+        }
+        s += &format!("📄 {}", a.name);
+    }
+    s
 }

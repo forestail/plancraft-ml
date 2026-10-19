@@ -14,6 +14,8 @@ pub struct ProjectInfo {
     company: String,
     author: String,
     notes: String,
+    attachments: Vec<plancraft_core::attach::Attachment>,
+    attach_status: Option<String>,
     start: String,
     status_date: String,
     calendar: CalendarId,
@@ -41,6 +43,8 @@ impl ProjectInfo {
             company: p.company.clone(),
             author: p.author.clone(),
             notes: p.notes.clone(),
+            attachments: p.attachments.clone(),
+            attach_status: None,
             start: format::iso(Some(p.start)),
             status_date: p.status_date.map(format::edit_day).unwrap_or_default(),
             calendar: p.calendar,
@@ -67,6 +71,7 @@ impl ProjectInfo {
         p.company = self.company.clone();
         p.author = self.author.clone();
         p.notes = self.notes.clone();
+        p.attachments = self.attachments.clone();
         if self.from_finish {
             let f = p.parse_datetime(&self.finish, true).ok_or(crate::tr("Finish date must look like YYYY-MM-DD"))?;
             p.settings.schedule_from_finish = true;
@@ -161,6 +166,12 @@ impl ProjectInfo {
                 });
                 ui.label(crate::tr("Notes:"));
                 ui.add(egui::TextEdit::multiline(&mut self.notes).desired_rows(3).desired_width(f32::INFINITY));
+                if let Some(m) = super::extra::attachments_ui(ui, &mut self.attachments, "project") {
+                    self.attach_status = Some(m);
+                }
+                if let Some(m) = &self.attach_status {
+                    ui.label(RichText::new(m).color(theme::pal().TEXT_WEAK));
+                }
                 ui.add_space(6.0);
                 egui::CollapsingHeader::new(RichText::new(crate::tr("Options: schedule, calendar & estimates")).strong())
                     .default_open(true)

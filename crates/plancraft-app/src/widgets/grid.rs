@@ -149,6 +149,8 @@ pub struct GridConfig<'a> {
     pub show_vscroll: bool,
     pub header_height: f32,
     pub row_height: f32,
+    /// Text in the row-number column (default: the row number); an empty string leaves it blank.
+    pub row_label: Option<&'a dyn Fn(usize) -> String>,
 }
 
 pub struct GridOutput {
@@ -393,7 +395,7 @@ pub fn show(
                 body_painter.text(
                     pos2(rr.right() - 6.0, rr.center().y),
                     Align2::RIGHT_CENTER,
-                    (row + 1).to_string(),
+                    cfg.row_label.map(|f| f(row)).unwrap_or_else(|| (row + 1).to_string()),
                     FontId::proportional(11.5),
                     theme::pal().TEXT_WEAK,
                 );

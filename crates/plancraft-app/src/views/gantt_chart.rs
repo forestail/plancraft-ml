@@ -133,6 +133,15 @@ pub fn show(ui: &mut Ui, rect: Rect, g: &mut GanttState, scroll_y: &mut f32, inp
         if super::task_at(p, input.rows, r).is_some_and(|t| (input.selected)(t.id)) {
             bp.rect_filled(Rect::from_min_size(pos2(body.left(), y), vec2(body.width(), rh)), 0.0, theme::pal().SELECTION_TINT);
         }
+        // Group header ("Group by"): a band with a summary-style bar over the group's dates.
+        if let Some(h) = input.rows.get(r).and_then(|&i| super::group_header(i)) {
+            bp.rect_filled(Rect::from_min_size(pos2(body.left(), y), vec2(body.width(), rh)), 0.0, theme::pal().HEADER_BG);
+            if let (Some(s), Some(f)) = (h.start, h.finish) {
+                let (x0, x1) = (g.x_of(chart_left, s), g.x_of(chart_left, f).max(g.x_of(chart_left, s) + 1.0));
+                let yc = y + rh / 2.0;
+                bp.rect_filled(Rect::from_min_max(pos2(x0, yc - 3.0), pos2(x1, yc + 2.0)), 0.0, theme::pal().BAR_SUMMARY);
+            }
+        }
     }
 
     // Today & status date & project start.
@@ -163,8 +172,9 @@ pub fn show(ui: &mut Ui, rect: Rect, g: &mut GanttState, scroll_y: &mut f32, inp
         geom.insert(t.id, BarGeom { y, x0: g.x_of(chart_left, s), x1: g.x_of(chart_left, f) });
     }
 
-    // ---- Links ----
-    if g.show_links {
+    // ---- Links (not in grouped views, where tasks leave their outline and may repeat) ----
+    let grouped = input.rows.iter().any(|&i| i >= super::GROUP_BASE);
+    if g.show_links && !grouped {
         let link_stroke = Stroke::new(1.0, theme::pal().LINK);
         for &idx in input.rows {
             let Some(t) = p.tasks.get(idx) else { continue };
@@ -242,7 +252,7 @@ pub fn show(ui: &mut Ui, rect: Rect, g: &mut GanttState, scroll_y: &mut f32, inp
     }
 
     // Milestone membership: dashed connectors from member tasks to their milestone.
-    if g.show_links {
+    if g.show_links && !grouped {
         let stroke = Stroke::new(1.0, theme::pal().MEMBER_LINK);
         for &idx in input.rows {
             let Some(t) = p.tasks.get(idx) else { continue };
@@ -348,6 +358,17 @@ pub fn show(ui: &mut Ui, rect: Rect, g: &mut GanttState, scroll_y: &mut f32, inp
             if g.show_progress && t.sched.percent_complete > 0.0 {
                 let px = x0 + (x1 - x0) * t.sched.percent_complete / 100.0;
                 bp.rect_filled(Rect::from_min_max(pos2(x0, yc - 1.5), pos2(px, yc + 1.5)), 0.0, theme::pal().BAR_PROGRESS);
+            }
+            // A task split by "Update Project": a gap with a dotted line until work resumes.
+            if let Some((stop, resume)) = plancraft_core::extras::split_points(p, idx) {
+                let (xs, xr) = (g.x_of(chart_left, stop), g.x_of(chart_left, resume));
+                if xr > xs + 2.0 {
+                    let gap = Rect::from_min_max(pos2(xs, bar_rect.top() - 1.0), pos2(xr, bar_rect.bottom() + 1.0));
+                    let bg = if (input.selected)(t.id) { theme::pal().SELECTION_TINT } else { theme::pal().BG };
+                    bp.rect_filled(gap, 0.0, theme::pal().BG);
+                    bp.rect_filled(gap, 0.0, bg);
+                    bp.extend(Shape::dashed_line(&[pos2(xs, yc), pos2(xr, yc)], Stroke::new(1.0, edge), 2.0, 2.0));
+                }
             }
             if g.show_slack && t.sched.total_slack > 0 {
                 let cal = task_calendar(p, idx);

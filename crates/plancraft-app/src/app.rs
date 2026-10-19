@@ -124,6 +124,14 @@ impl PlanCraftApp {
                 app.st.view = view;
             }
         }
+        if let Ok(v) = std::env::var("PLANCRAFT_GROUP") {
+            if let Some(g) = crate::state::TaskGroup::ALL.into_iter().find(|g| format!("{g:?}").eq_ignore_ascii_case(&v)) {
+                app.st.group = g;
+            }
+            if let Some(g) = crate::state::ResourceGroup::ALL.into_iter().find(|g| format!("{g:?}").eq_ignore_ascii_case(&v)) {
+                app.st.resource_group = g;
+            }
+        }
         if app.settings.mcp_autostart {
             app.mcp.start(app.ws.clone(), cc.egui_ctx.clone(), app.settings.mcp_port);
         }
@@ -812,11 +820,17 @@ impl PlanCraftApp {
             }
             Command::Statistics => self.dialogs.stats = true,
             Command::BaselineDialog(clear) => self.dialogs.baseline = Some(dialogs::extra::BaselineDialog::new(clear, sel.clone())),
+            Command::UpdateProject => {
+                self.dialogs.update_project = Some(dialogs::extra::UpdateProjectDialog::new(&doc.project, sel.clone()))
+            }
             Command::DefineWbs => self.dialogs.wbs = Some(dialogs::extra::WbsDialog::new(&doc.project)),
             Command::Reports => {
                 if self.dialogs.reports.is_none() {
                     self.dialogs.reports = Some(Default::default());
                 }
+            }
+            Command::CustomReport => {
+                self.dialogs.reports.get_or_insert_with(Default::default).kind = dialogs::reports::ReportKind::Custom;
             }
             Command::RecurringTask => {
                 let at = first_sel_index.unwrap_or(doc.project.tasks.len());
@@ -1178,6 +1192,7 @@ impl PlanCraftApp {
             for name in std::env::var("PLANCRAFT_CMD").unwrap_or_default().split(',').filter(|s| !s.is_empty()) {
                 let cmd = match name {
                     "TaskInfo" => Command::TaskInfo,
+                    "TaskNotes" => Command::TaskNotes,
                     "ResourceInfo" => Command::ResourceInfo,
                     "ProjectInfo" => Command::ProjectInfo,
                     "WorkingTime" => Command::ChangeWorkingTime,
@@ -1196,6 +1211,8 @@ impl PlanCraftApp {
                     }
                     "Recurring" => Command::RecurringTask,
                     "Baseline" => Command::BaselineDialog(false),
+                    "UpdateProject" => Command::UpdateProject,
+                    "CustomReport" => Command::CustomReport,
                     "Wbs" => Command::DefineWbs,
                     "Templates" => Command::Templates,
                     "Hyperlink" => Command::Hyperlink,
@@ -1559,6 +1576,15 @@ impl PlanCraftApp {
                 }
                 if !keep {
                     self.dialogs.baseline = None;
+                }
+            }
+            if let Some(d) = &mut self.dialogs.update_project {
+                let (keep, msg) = d.show(&ctx, doc);
+                if let Some(m) = msg {
+                    self.st.toast(ToastKind::Success, m);
+                }
+                if !keep {
+                    self.dialogs.update_project = None;
                 }
             }
             if let Some(d) = &mut self.dialogs.wbs

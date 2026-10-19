@@ -129,6 +129,7 @@ pub fn sanitize(p: &mut Project) -> Vec<String> {
     s.name(&mut p.manager);
     s.name(&mut p.company);
     s.notes(&mut p.notes);
+    s.attachments(&mut p.attachments);
     s.datetime(&mut p.start);
     s.opt_date(&mut p.status_date);
     s.settings(&mut p.settings);
@@ -230,6 +231,18 @@ impl Fixer {
 
     fn notes(&mut self, s: &mut String) {
         self.text(s, MAX_NOTES_CHARS, "notes are longer than 100,000 characters");
+    }
+
+    fn attachments(&mut self, v: &mut Vec<crate::attach::Attachment>) {
+        let before = v.len();
+        v.retain(|a| a.data.len() <= crate::attach::MAX_ATTACHMENT_BYTES);
+        if v.len() != before {
+            self.note("an embedded file is larger than 25 MB");
+        }
+        self.list(v, crate::attach::MAX_ATTACHMENTS, "a note has more than 64 embedded files");
+        for a in v.iter_mut() {
+            a.name = crate::attach::clean_name(&a.name);
+        }
     }
 
     fn list<T>(&mut self, v: &mut Vec<T>, max: usize, what: &'static str) {
@@ -356,6 +369,10 @@ impl Fixer {
         self.name(&mut t.name);
         self.name(&mut t.deliverable);
         self.notes(&mut t.notes);
+        self.attachments(&mut t.attachments);
+        if let Some(r) = t.resume.as_mut() {
+            self.datetime(r);
+        }
         if t.outline_level > MAX_OUTLINE_LEVEL {
             t.outline_level = MAX_OUTLINE_LEVEL;
             self.note("tasks are nested more than 100 levels deep");
@@ -413,6 +430,7 @@ impl Fixer {
         self.name(&mut r.email);
         self.name(&mut r.material_label);
         self.notes(&mut r.notes);
+        self.attachments(&mut r.attachments);
         self.f64(&mut r.max_units, 0.0, MAX_UNITS, "a resource's maximum units are out of range");
         self.f64(&mut r.standard_rate, 0.0, MAX_MONEY, "a rate is out of range");
         self.f64(&mut r.overtime_rate, 0.0, MAX_MONEY, "a rate is out of range");

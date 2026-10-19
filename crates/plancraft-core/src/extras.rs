@@ -576,6 +576,123 @@ pub fn tasks_in_progress(p: &Project) -> Vec<usize> {
         .collect()
 }
 
+// ---------------------------------------------------------------------------
+// Update Project (Project ▸ Update Project)
+// ---------------------------------------------------------------------------
+
+/// How "Update work as complete through" sets % complete.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum UpdateMode {
+    /// Set 0% – 100% complete (in proportion to the time passed).
+    #[default]
+    Proportional,
+    /// Set 0% or 100% complete only (only tasks that should have finished).
+    ZeroOrHundred,
+}
+
+/// Leaf tasks the update applies to: all, or the given ones (summaries stand for their subtasks).
+fn update_targets(p: &Project, only: Option<&[TaskId]>) -> Vec<usize> {
+    let mut wanted = vec![only.is_none(); p.tasks.len()];
+    if let Some(ids) = only {
+        for id in ids {
+            let Some(i) = p.task_index(*id) else { continue };
+            if let Some(w) = wanted.get_mut(i) {
+                *w = true;
+            }
+            for d in p.descendants_range(i) {
+                if let Some(w) = wanted.get_mut(d) {
+                    *w = true;
+                }
+            }
+        }
+    }
+    (0..p.tasks.len())
+        .filter(|&i| wanted.get(i).copied().unwrap_or(false) && !p.has_children(i))
+        .filter(|&i| p.tasks.get(i).is_some_and(|t| t.active && !t.is_complete()))
+        .collect()
+}
+
+/// "Update work as complete through": tasks that should have finished by `through` become 100%
+/// complete; tasks in progress get the share of their duration that has passed. Never lowers
+/// progress. Sets the status date. Returns the number of tasks updated.
+pub fn update_complete_through(p: &mut Project, through: NaiveDateTime, mode: UpdateMode, only: Option<&[TaskId]>) -> PlanResult<usize> {
+    let mut changes: Vec<(TaskId, u8)> = Vec::new();
+    for i in update_targets(p, only) {
+        let Some(t) = p.tasks.get(i) else { continue };
+        let (Some(s), Some(f)) = (t.sched.start, t.sched.finish) else { continue };
+        let pct = if f <= through {
+            100
+        } else if s < through && mode == UpdateMode::Proportional {
+            let cal = task_calendar(p, i);
+            let total = cal.between(s, f).max(1);
+            let done = cal.between(s, through).clamp(0, total);
+            ((done as f64 / total as f64 * 100.0).round() as u8).clamp(1, 99)
+        } else {
+            continue;
+        };
+        if pct > t.percent_complete {
+            changes.push((t.id, pct));
+        }
+    }
+    for (id, pct) in &changes {
+        p.set_percent_complete(*id, *pct)?;
+    }
+    p.status_date = Some(through.date());
+    Ok(changes.len())
+}
+
+/// "Reschedule uncompleted work to start after": unstarted tasks get a Start No Earlier Than
+/// constraint; the remaining part of tasks in progress resumes at `after` (the task is split).
+/// Returns the number of tasks moved.
+pub fn reschedule_uncompleted_after(p: &mut Project, after: NaiveDateTime, only: Option<&[TaskId]>) -> PlanResult<usize> {
+    let mut moved = 0;
+    for i in update_targets(p, only) {
+        let cal = task_calendar(p, i);
+        let resume_at = cal.snap_forward(after);
+        let Some(t) = p.tasks.get(i) else { continue };
+        if t.mode == ScheduleMode::Manual {
+            continue;
+        }
+        let started = t.actual_start.is_some() || t.percent_complete > 0;
+        if !started {
+            if t.sched.start.is_some_and(|s| s < resume_at) {
+                let keep_later = t.constraint.kind == ConstraintKind::Snet && t.constraint.date.is_some_and(|d| d >= resume_at);
+                if !keep_later {
+                    if let Some(tm) = p.tasks.get_mut(i) {
+                        tm.constraint = Constraint { kind: ConstraintKind::Snet, date: Some(resume_at) };
+                    }
+                    moved += 1;
+                }
+            }
+            continue;
+        }
+        let Some(a) = t.actual_start.or(t.sched.start) else { continue };
+        let done = t.duration.max(0) * Minutes::from(t.percent_complete) / 100;
+        let stop = cal.add(a, done);
+        if stop < resume_at {
+            if let Some(tm) = p.tasks.get_mut(i) {
+                tm.actual_start = Some(a);
+                tm.resume = Some(resume_at);
+            }
+            moved += 1;
+        }
+    }
+    Ok(moved)
+}
+
+/// Where a split task stops and resumes (`None` if it is not split).
+pub fn split_points(p: &Project, i: usize) -> Option<(NaiveDateTime, NaiveDateTime)> {
+    let t = p.tasks.get(i)?;
+    let r = t.resume?;
+    if t.is_complete() || t.actual_finish.is_some() {
+        return None;
+    }
+    let a = t.actual_start?;
+    let cal = task_calendar(p, i);
+    let stop = cal.add(a, t.duration.max(0) * Minutes::from(t.percent_complete) / 100);
+    (stop < r).then_some((stop, r))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -675,5 +792,50 @@ mod tests {
         assert!(p.tasks.iter().all(|t| t.baseline.is_some() || t.sched.start.is_none() || true));
         p.clear_plan(PlanSlot::Baseline(2), &[]);
         assert!(p.tasks.iter().all(|t| t.baselines.is_empty()));
+    }
+
+    #[test]
+    fn update_project_marks_progress_and_reschedules() {
+        let mut p = demo();
+        crate::schedule::recalculate(&mut p);
+        let leaf =
+            (0..p.tasks.len()).find(|&i| !p.has_children(i) && p.tasks[i].percent_complete == 0 && p.tasks[i].duration >= 3 * 480).unwrap();
+        let t = p.tasks[leaf].clone();
+        let (s, f) = (t.sched.start.unwrap(), t.sched.finish.unwrap());
+        let mid = s + (f - s) / 2;
+        let n = update_complete_through(&mut p, mid, UpdateMode::Proportional, Some(&[t.id])).unwrap();
+        assert_eq!(n, 1);
+        let pct = p.tasks[leaf].percent_complete;
+        assert!(pct > 0 && pct < 100, "{pct}");
+        assert_eq!(p.status_date, Some(mid.date()));
+        crate::schedule::recalculate(&mut p);
+        // 0%/100% mode leaves a task in progress alone.
+        let other = (0..p.tasks.len())
+            .find(|&i| i != leaf && !p.has_children(i) && p.tasks[i].percent_complete == 0 && p.tasks[i].duration > 480)
+            .unwrap();
+        let oid = p.tasks[other].id;
+        let os = p.tasks[other].sched.start.unwrap();
+        update_complete_through(&mut p, os + chrono::Duration::hours(2), UpdateMode::ZeroOrHundred, Some(&[oid])).unwrap();
+        assert_eq!(p.tasks[other].percent_complete, 0);
+
+        // Resume the in-progress task a month later: the remaining work moves, duration stays.
+        let after = f + chrono::Duration::days(30);
+        let moved = reschedule_uncompleted_after(&mut p, after, Some(&[t.id])).unwrap();
+        assert_eq!(moved, 1);
+        crate::schedule::recalculate(&mut p);
+        let tt = &p.tasks[leaf];
+        assert_eq!(tt.sched.start, Some(s));
+        assert!(tt.sched.finish.unwrap() > after);
+        assert_eq!(tt.duration, t.duration);
+        let (stop, resume) = split_points(&p, leaf).unwrap();
+        assert!(stop < resume);
+        // Everything unstarted before `after` now starts after it.
+        reschedule_uncompleted_after(&mut p, after, None).unwrap();
+        crate::schedule::recalculate(&mut p);
+        for (i, x) in p.tasks.iter().enumerate() {
+            if !p.has_children(i) && x.active && x.percent_complete == 0 && x.mode == ScheduleMode::Auto {
+                assert!(x.sched.start.unwrap() >= after, "{}", x.name);
+            }
+        }
     }
 }

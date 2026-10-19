@@ -9,7 +9,7 @@ use plancraft_core::workspace::Document;
 use crate::commands::Command;
 use crate::edit::EditExt;
 use crate::format;
-use crate::state::{ToastKind, UiState};
+use crate::state::{ResourceGroup, ToastKind, UiState};
 use crate::theme;
 use crate::widgets::grid::{self, Cell, ColumnDef, GridConfig, GridEvent};
 
@@ -115,8 +115,8 @@ fn cell(p: &Project, r: &Resource, col: Col, over: &HashSet<ResourceId>, work: &
                     crate::tr_dyn(&format!("{} calendar exception(s): time off or altered hours", r.exceptions.len())),
                 ));
             }
-            if !r.notes.is_empty() {
-                icons.push(("📝".to_string(), theme::pal().TEXT_WEAK, r.notes.clone()));
+            if !r.notes.is_empty() || !r.attachments.is_empty() {
+                icons.push(("📝".to_string(), theme::pal().TEXT_WEAK, crate::columns::note_tooltip(&r.notes, &r.attachments)));
             }
             icons.truncate(2);
             Cell { icons, ..Default::default() }
@@ -213,6 +213,80 @@ fn commit(p: &mut Project, id: ResourceId, col: Col, text: &str) -> Result<(), S
     Ok(())
 }
 
+/// A group header of the grouped Resource Sheet.
+struct ResHeader {
+    label: String,
+    count: usize,
+    work: Minutes,
+    cost: f64,
+}
+
+const RES_GROUP_BASE: usize = usize::MAX / 2;
+
+/// Display rows (resource indices, or `RES_GROUP_BASE + header`) for "Group by".
+fn resource_rows(p: &Project, st: &UiState, work: &HashMap<ResourceId, (Minutes, f64)>) -> (Vec<usize>, Vec<ResHeader>) {
+    if st.resource_group == ResourceGroup::None {
+        return ((0..p.resources.len()).collect(), Vec::new());
+    }
+    let field = |name: &str, value: String| format!("{}: {}", crate::tr_dyn(name), value);
+    let mut groups: std::collections::BTreeMap<(i64, String), Vec<usize>> = std::collections::BTreeMap::new();
+    for (i, r) in p.resources.iter().enumerate() {
+        let key = match st.resource_group {
+            ResourceGroup::None => (0, String::new()),
+            ResourceGroup::Group => {
+                if r.group.trim().is_empty() {
+                    (0, field("Group", crate::tr("(none)").to_string()))
+                } else {
+                    (1, field("Group", r.group.trim().to_string()))
+                }
+            }
+            ResourceGroup::Type => {
+                let o = match r.kind {
+                    ResourceType::Work => 0,
+                    ResourceType::Material => 1,
+                    ResourceType::Cost => 2,
+                };
+                (o, field("Type", type_label(r.kind).to_string()))
+            }
+            ResourceGroup::StandardRate => {
+                ((r.standard_rate * 100.0).round() as i64, field("Std. Rate", format::money(p, r.standard_rate)))
+            }
+            ResourceGroup::Category => {
+                let o = ResourceCategory::ALL.iter().position(|c| *c == r.category).unwrap_or(0) as i64;
+                (o, field("Category", r.category.label().to_string()))
+            }
+        };
+        groups.entry(key).or_default().push(i);
+    }
+    let mut rows = Vec::new();
+    let mut headers = Vec::new();
+    for ((_, label), members) in groups {
+        let mut h = ResHeader { label: label.clone(), count: members.len(), work: 0, cost: 0.0 };
+        for &i in &members {
+            if let Some((w, c)) = p.resources.get(i).and_then(|r| work.get(&r.id)) {
+                h.work += *w;
+                h.cost += *c;
+            }
+        }
+        rows.push(RES_GROUP_BASE + headers.len());
+        headers.push(h);
+        if !st.collapsed_groups.contains(&label) {
+            rows.extend(members);
+        }
+    }
+    (rows, headers)
+}
+
+fn header_cell(p: &Project, h: &ResHeader, col: Col, expanded: bool) -> Cell {
+    let text = match col {
+        Col::Name => format!("{}  ({})", h.label, h.count),
+        Col::Work => format_work(h.work),
+        Col::Cost => format::money(p, h.cost),
+        _ => String::new(),
+    };
+    Cell { text, bold: true, bg: Some(theme::pal().HEADER_BG), expander: (col == Col::Name).then_some(expanded), ..Default::default() }
+}
+
 pub fn show(ui: &mut Ui, rect: Rect, doc: &mut Document, st: &mut UiState, out: &mut Vec<Command>) {
     let defs = defs(&doc.project);
     let over: HashSet<ResourceId> = plancraft_core::workload::overallocations(&doc.project).into_iter().map(|(r, _)| r).collect();
@@ -229,28 +303,41 @@ pub fn show(ui: &mut Ui, rect: Rect, doc: &mut Document, st: &mut UiState, out: 
             ResourceType::Cost => a.cost,
         };
     }
-    let n = doc.project.resources.len();
+    let (rows, headers) = resource_rows(&doc.project, st, &work);
+    let header_of = |row: usize| rows.get(row).and_then(|&i| i.checked_sub(RES_GROUP_BASE)).and_then(|h| headers.get(h));
+    let row_label = |row: usize| match rows.get(row) {
+        Some(&i) if i < RES_GROUP_BASE => (i + 1).to_string(),
+        _ => String::new(),
+    };
     let cfg = GridConfig {
         id: egui::Id::new("resource_sheet"),
         columns: &defs,
-        row_count: n,
+        row_count: rows.len(),
         blank_rows: 20,
         row_numbers: true,
         show_vscroll: true,
         header_height: 30.0,
         row_height: theme::ROW_HEIGHT,
+        row_label: Some(&row_label),
     };
     let output = {
         let p = &doc.project;
         let sel = &st.sel;
-        let is_sel = |r: usize| p.resources.get(r).is_some_and(|res| sel.resources.contains(&res.id));
-        let mut cellf = |r: usize, c: usize| match (p.resources.get(r), COLS.get(c)) {
-            (Some(res), Some(&col)) => cell(p, res, col, &over, &work),
-            _ => Cell::default(),
+        let collapsed = &st.collapsed_groups;
+        let is_sel = |r: usize| rows.get(r).and_then(|&i| p.resources.get(i)).is_some_and(|res| sel.resources.contains(&res.id));
+        let mut cellf = |r: usize, c: usize| {
+            if let (Some(h), Some(&col)) = (header_of(r), COLS.get(c)) {
+                return header_cell(p, h, col, !collapsed.contains(&h.label));
+            }
+            match (rows.get(r).and_then(|&i| p.resources.get(i)), COLS.get(c)) {
+                (Some(res), Some(&col)) => cell(p, res, col, &over, &work),
+                _ => Cell::default(),
+            }
         };
         grid::show(ui, rect, &mut st.resource_grid, &cfg, &is_sel, &mut cellf)
     };
-    let resource_at = |doc: &Document, row: usize| doc.project.resources.get(row).map(|r| r.id);
+    let n = rows.len();
+    let resource_at = |doc: &Document, row: usize| rows.get(row).and_then(|&i| doc.project.resources.get(i)).map(|r| r.id);
     for ev in output.events {
         match ev {
             GridEvent::Select { row, ctrl, .. } => {
@@ -305,7 +392,14 @@ pub fn show(ui: &mut Ui, rect: Rect, doc: &mut Document, st: &mut UiState, out: 
                 }
             }
             GridEvent::ClickEmpty { .. } => st.sel.resources.clear(),
-            GridEvent::ToggleExpand(_) => {}
+            GridEvent::ToggleExpand(row) => {
+                if let Some(h) = header_of(row) {
+                    let l = h.label.clone();
+                    if !st.collapsed_groups.remove(&l) {
+                        st.collapsed_groups.insert(l);
+                    }
+                }
+            }
         }
     }
 }

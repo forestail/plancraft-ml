@@ -54,7 +54,7 @@ pub fn show(ui: &mut Ui, rect: Rect, doc: &mut Document, st: &mut UiState, out: 
         periods.binary_search(&b).ok()
     };
 
-    let task_rows = super::visible_rows(p, st);
+    let task_rows = super::visible_rows_ungrouped(p, st);
     let mut rows = Vec::new();
     for &i in &task_rows {
         let Some(t) = p.tasks.get(i) else { continue };
@@ -113,6 +113,7 @@ pub fn show(ui: &mut Ui, rect: Rect, doc: &mut Document, st: &mut UiState, out: 
         show_vscroll: false,
         header_height: theme::HEADER_HEIGHT,
         row_height: theme::ROW_HEIGHT,
+        row_label: None,
     };
     let left = Rect::from_min_size(rect.min, vec2(left_w, rect.height()));
     let output = {

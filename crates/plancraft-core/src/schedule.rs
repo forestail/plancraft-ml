@@ -488,6 +488,17 @@ impl<'a> Engine<'a> {
             if let Some(a) = t.actual_start {
                 s = a;
                 f = if dur > 0 { cal.add(a, dur) } else { a };
+                // Split by "Update Project": the unfinished part resumes later.
+                if let Some(r) = t.resume
+                    && dur > 0
+                    && t.percent_complete < 100
+                {
+                    let done = dur * Minutes::from(t.percent_complete) / 100;
+                    let stop = cal.add(a, done);
+                    if r > stop {
+                        f = cal.add(cal.snap_forward(r), dur - done);
+                    }
+                }
             }
             if let Some(af) = t.actual_finish {
                 if t.actual_start.is_none() {

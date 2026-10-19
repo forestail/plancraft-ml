@@ -78,6 +78,7 @@ pub struct TaskInfo {
     deliverable: String,
     members: Vec<TaskRef>,
     notes: String,
+    attachments: Vec<plancraft_core::attach::Attachment>,
     error: Option<String>,
     summary: bool,
 }
@@ -145,6 +146,7 @@ impl TaskInfo {
             deliverable: t.deliverable.clone(),
             members: t.members.clone(),
             notes: t.notes.clone(),
+            attachments: t.attachments.clone(),
             error: None,
             summary: t.sched.is_summary,
         })
@@ -178,6 +180,7 @@ impl TaskInfo {
             t.ignore_resource_calendars = self.ignore_res_cal;
             t.show_on_timeline = self.on_timeline;
             t.notes = self.notes.clone();
+            t.attachments = self.attachments.clone();
             t.deliverable = self.deliverable.clone();
             t.fixed_cost = format::parse_money(&self.fixed_cost).unwrap_or(0.0);
             t.fixed_cost_accrual = self.fixed_cost_accrual;
@@ -357,7 +360,11 @@ impl TaskInfo {
                     Tab::Estimate => self.estimate(ui, &doc.project),
                     Tab::Milestone => self.milestone_tab(ui, &doc.project),
                     Tab::Notes => {
-                        ui.add(egui::TextEdit::multiline(&mut self.notes).desired_rows(14).desired_width(f32::INFINITY));
+                        ui.add(egui::TextEdit::multiline(&mut self.notes).desired_rows(11).desired_width(f32::INFINITY));
+                        ui.add_space(6.0);
+                        if let Some(m) = super::extra::attachments_ui(ui, &mut self.attachments, "task") {
+                            self.error = Some(m);
+                        }
                     }
                 });
                 if let Some(e) = &self.error {
@@ -532,7 +539,7 @@ impl TaskInfo {
                 ui.add(egui::TextEdit::singleline(&mut row.units).desired_width(60.0));
                 ui.add(egui::TextEdit::singleline(&mut row.work).desired_width(70.0).hint_text(crate::tr("auto")));
                 egui::ComboBox::from_id_salt(("ti_contour", i)).width(130.0).selected_text(row.contour.label()).show_ui(ui, |ui| {
-                    for c in [WorkContour::Flat, WorkContour::FrontLoaded, WorkContour::BackLoaded, WorkContour::Bell] {
+                    for c in WorkContour::ALL {
                         ui.selectable_value(&mut row.contour, c, c.label());
                     }
                 });

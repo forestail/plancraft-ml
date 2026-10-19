@@ -296,6 +296,113 @@ impl BaselineDialog {
 }
 
 // ---------------------------------------------------------------------------
+// Update Project
+// ---------------------------------------------------------------------------
+
+pub struct UpdateProjectDialog {
+    reschedule: bool,
+    mode: plancraft_core::extras::UpdateMode,
+    through: String,
+    after: String,
+    selected_only: bool,
+    ids: Vec<TaskId>,
+    error: Option<String>,
+}
+
+impl UpdateProjectDialog {
+    pub fn new(p: &Project, selected: Vec<TaskId>) -> Self {
+        let day = format::edit_day(plancraft_core::report::status_moment(p).date());
+        Self {
+            reschedule: false,
+            mode: Default::default(),
+            through: day.clone(),
+            after: day,
+            selected_only: false,
+            ids: selected,
+            error: None,
+        }
+    }
+
+    pub fn show(&mut self, ctx: &Context, doc: &mut Document) -> (bool, Option<String>) {
+        use plancraft_core::extras::UpdateMode;
+        let mut open = true;
+        let mut close = false;
+        let mut done = None;
+        window(crate::tr("Update Project").into(), "update_project", ctx, &mut open).open(&mut open).show(ctx, |ui| {
+            ui.set_min_width(460.0);
+            egui::Grid::new("upd_grid").num_columns(2).spacing([10.0, 8.0]).show(ui, |ui| {
+                ui.radio_value(&mut self.reschedule, false, crate::tr("Update work as complete through:"));
+                ui.add_enabled(!self.reschedule, egui::TextEdit::singleline(&mut self.through).desired_width(110.0));
+                ui.end_row();
+                ui.add_enabled_ui(!self.reschedule, |ui| {
+                    ui.vertical(|ui| {
+                        for (m, label) in [
+                            (UpdateMode::Proportional, crate::tr("Set 0% – 100% complete")),
+                            (UpdateMode::ZeroOrHundred, crate::tr("Set 0% or 100% complete only")),
+                        ] {
+                            ui.horizontal(|ui| {
+                                ui.add_space(22.0);
+                                ui.radio_value(&mut self.mode, m, label);
+                            });
+                        }
+                    });
+                });
+                ui.end_row();
+                ui.radio_value(&mut self.reschedule, true, crate::tr("Reschedule uncompleted work to start after:"));
+                ui.add_enabled(self.reschedule, egui::TextEdit::singleline(&mut self.after).desired_width(110.0));
+                ui.end_row();
+            });
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                ui.label(crate::tr("For:"));
+                ui.radio_value(&mut self.selected_only, false, crate::tr("Entire project"));
+                ui.add_enabled_ui(!self.ids.is_empty(), |ui| {
+                    ui.radio_value(&mut self.selected_only, true, crate::tr("Selected tasks"));
+                });
+            });
+            if let Some(e) = &self.error {
+                ui.colored_label(theme::pal().ERROR, e);
+            }
+            let (ok, cancel) = ok_cancel(ui);
+            if cancel {
+                close = true;
+            }
+            if ok {
+                let text = if self.reschedule { &self.after } else { &self.through };
+                let Some(date) = doc.project.parse_datetime(text, !self.reschedule) else {
+                    self.error = Some(crate::tr("Enter a date like 31.12.2026").to_string());
+                    return;
+                };
+                // "Through" a day means up to the end of that working day.
+                let at =
+                    if self.reschedule { date } else { plancraft_core::schedule::project_calendar(&doc.project).day_finish(date.date()) };
+                let ids: Option<Vec<TaskId>> = self.selected_only.then(|| self.ids.clone());
+                let (reschedule, mode) = (self.reschedule, self.mode);
+                let r = doc.edit_msg(crate::tr("Update Project"), |p| {
+                    if reschedule {
+                        plancraft_core::extras::reschedule_uncompleted_after(p, at, ids.as_deref()).map_err(|e| e.to_string())
+                    } else {
+                        plancraft_core::extras::update_complete_through(p, at, mode, ids.as_deref()).map_err(|e| e.to_string())
+                    }
+                });
+                match r {
+                    Ok(n) => {
+                        done = Some(if reschedule {
+                            crate::tr_dyn(&format!("Tasks rescheduled: {n}"))
+                        } else {
+                            crate::tr_dyn(&format!("Tasks updated: {n}"))
+                        });
+                        close = true;
+                    }
+                    Err(e) => self.error = Some(e),
+                }
+            }
+        });
+        (open && !close, done)
+    }
+}
+
+// ---------------------------------------------------------------------------
 // WBS Code Definition
 // ---------------------------------------------------------------------------
 
@@ -455,4 +562,79 @@ pub fn open_link(address: &str) -> std::io::Result<()> {
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     let r = std::process::Command::new("xdg-open").arg(a).spawn();
     r.map(|_| ())
+}
+
+// ---------------------------------------------------------------------------
+// Files embedded in notes ("Insert Object ▸ Create from file")
+// ---------------------------------------------------------------------------
+
+/// Folder where embedded files are written when opened.
+fn attachment_dir() -> std::path::PathBuf {
+    std::env::temp_dir().join("plancraft-attachments").join(uuid::Uuid::new_v4().simple().to_string())
+}
+
+/// The list of files embedded in a note, with "Insert Object…", "Open", "Save As…" and "Remove".
+/// Returns a status message to show (errors and confirmations).
+pub fn attachments_ui(ui: &mut egui::Ui, list: &mut Vec<plancraft_core::attach::Attachment>, salt: &str) -> Option<String> {
+    use plancraft_core::attach::{Attachment, MAX_ATTACHMENTS};
+    let mut status = None;
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new(crate::tr("Embedded files:")).strong());
+        if ui
+            .add_enabled(list.len() < MAX_ATTACHMENTS, egui::Button::new(crate::tr("📎 Insert Object…")))
+            .on_hover_text(crate::tr("Embed a document into the project file (Create from file)"))
+            .clicked()
+            && let Some(paths) = rfd::FileDialog::new().set_title(crate::tr("Insert Object")).pick_files()
+        {
+            for path in paths {
+                if list.len() >= MAX_ATTACHMENTS {
+                    break;
+                }
+                match Attachment::from_file(&path) {
+                    Ok(a) => list.push(a),
+                    Err(e) => status = Some(crate::tr_dyn(&e)),
+                }
+            }
+        }
+    });
+    if list.is_empty() {
+        ui.label(egui::RichText::new(crate::tr("No embedded files.")).color(crate::theme::pal().TEXT_WEAK));
+        return status;
+    }
+    let mut remove = None;
+    egui::Grid::new(("attachments", salt)).num_columns(4).spacing([10.0, 4.0]).striped(true).show(ui, |ui| {
+        for (i, a) in list.iter().enumerate() {
+            ui.label(format!("📄 {}", a.name));
+            ui.label(egui::RichText::new(a.size_label()).color(crate::theme::pal().TEXT_WEAK));
+            ui.horizontal(|ui| {
+                if ui.button(crate::tr("Open")).clicked() {
+                    status = Some(match a.extract_to(&attachment_dir()) {
+                        Ok(path) => match open_link(&path.to_string_lossy()) {
+                            Ok(()) => crate::tr_dyn(&format!("Opened {}", a.name)),
+                            Err(e) => crate::tr_dyn(&format!("Could not open {}: {}", a.name, e)),
+                        },
+                        Err(e) => crate::tr_dyn(&format!("Could not open {}: {}", a.name, e)),
+                    });
+                }
+                if ui.button(crate::tr("Save As…")).clicked()
+                    && let Some(path) = rfd::FileDialog::new().set_file_name(&a.name).save_file()
+                {
+                    status = Some(match std::fs::write(&path, &a.data) {
+                        Ok(()) => crate::tr_dyn(&format!("Saved {}", path.display())),
+                        Err(e) => crate::tr_dyn(&format!("Could not save {}: {}", path.display(), e)),
+                    });
+                }
+            });
+            if ui.small_button("✖").on_hover_text(crate::tr("Remove from the project")).clicked() {
+                remove = Some(i);
+            }
+            ui.end_row();
+        }
+    });
+    if let Some(i) = remove
+        && i < list.len()
+    {
+        list.remove(i);
+    }
+    status
 }

@@ -151,6 +151,73 @@ impl TaskFilter {
     }
 }
 
+/// "View ▸ Group by" for task views (Microsoft Project's built-in groups).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum TaskGroup {
+    #[default]
+    None,
+    CompleteIncomplete,
+    ConstraintType,
+    Critical,
+    Duration,
+    Milestones,
+    Priority,
+    Resource,
+    Status,
+}
+
+impl TaskGroup {
+    pub const ALL: [TaskGroup; 9] = [
+        TaskGroup::None,
+        TaskGroup::CompleteIncomplete,
+        TaskGroup::ConstraintType,
+        TaskGroup::Critical,
+        TaskGroup::Duration,
+        TaskGroup::Milestones,
+        TaskGroup::Priority,
+        TaskGroup::Resource,
+        TaskGroup::Status,
+    ];
+    pub fn label(self) -> &'static str {
+        match self {
+            TaskGroup::None => crate::tr("No Group"),
+            TaskGroup::CompleteIncomplete => crate::tr("Complete and Incomplete Tasks"),
+            TaskGroup::ConstraintType => crate::tr("Constraint Type"),
+            TaskGroup::Critical => crate::tr("Critical"),
+            TaskGroup::Duration => crate::tr("Duration"),
+            TaskGroup::Milestones => crate::tr("Milestones"),
+            TaskGroup::Priority => crate::tr("Priority"),
+            TaskGroup::Resource => crate::tr("Resource"),
+            TaskGroup::Status => crate::tr("Status"),
+        }
+    }
+}
+
+/// "View ▸ Group by" for the Resource Sheet.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum ResourceGroup {
+    #[default]
+    None,
+    Group,
+    Type,
+    StandardRate,
+    Category,
+}
+
+impl ResourceGroup {
+    pub const ALL: [ResourceGroup; 5] =
+        [ResourceGroup::None, ResourceGroup::Group, ResourceGroup::Type, ResourceGroup::StandardRate, ResourceGroup::Category];
+    pub fn label(self) -> &'static str {
+        match self {
+            ResourceGroup::None => crate::tr("No Group"),
+            ResourceGroup::Group => crate::tr("Resource Group"),
+            ResourceGroup::Type => crate::tr("Resource Type"),
+            ResourceGroup::StandardRate => crate::tr("Standard Rate"),
+            ResourceGroup::Category => crate::tr("Category"),
+        }
+    }
+}
+
 /// Gantt-chart drag in progress.
 #[derive(Clone, Debug)]
 pub enum BarDrag {
@@ -311,6 +378,11 @@ pub struct UiState {
     pub usage_detail: UsageDetail,
     /// Only the tab row is shown (double-click a tab to toggle).
     pub ribbon_collapsed: bool,
+    /// "Group by" of task views and of the Resource Sheet.
+    pub group: TaskGroup,
+    pub resource_group: ResourceGroup,
+    /// Collapsed group headers (by label).
+    pub collapsed_groups: HashSet<String>,
 }
 
 /// Rows shown per assignment in Task Usage / Resource Usage ("Format > Details").
@@ -355,6 +427,9 @@ impl Default for UiState {
             show_level: 0,
             usage_detail: UsageDetail::Work,
             ribbon_collapsed: false,
+            group: TaskGroup::None,
+            resource_group: ResourceGroup::None,
+            collapsed_groups: HashSet::new(),
         }
     }
 }

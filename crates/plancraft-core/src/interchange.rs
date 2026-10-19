@@ -519,7 +519,7 @@ pub fn import_mspdi(text: &str) -> Result<Project, String> {
                 work: if kind == Some(ResourceType::Work) { work } else { 0 },
                 actual_work: an.get("ActualWork").and_then(parse_xml_duration).unwrap_or(0).max(0),
                 cost: if kind == Some(ResourceType::Cost) { cost } else { 0.0 },
-                contour: WorkContour::Flat,
+                contour: WorkContour::from_mspdi_code(an.num("WorkContour").unwrap_or(0.0).clamp(0.0, 7.0) as u8),
             });
         }
     }
@@ -757,14 +757,15 @@ pub fn export_mspdi(p: &Project) -> String {
     s.push_str("  </Resources>\n  <Assignments>\n");
     for a in &p.assignments {
         s.push_str(&format!(
-            "    <Assignment><UID>{}</UID><TaskUID>{}</TaskUID><ResourceUID>{}</ResourceUID><Units>{:.2}</Units><Work>{}</Work><ActualWork>{}</ActualWork><Cost>{:.0}</Cost></Assignment>\n",
+            "    <Assignment><UID>{}</UID><TaskUID>{}</TaskUID><ResourceUID>{}</ResourceUID><Units>{:.2}</Units><Work>{}</Work><ActualWork>{}</ActualWork><Cost>{:.0}</Cost><WorkContour>{}</WorkContour></Assignment>\n",
             a.id.0,
             a.task.0,
             a.resource.0,
             a.units,
             xml_duration(a.work),
             xml_duration(a.actual_work),
-            a.cost * 100.0
+            a.cost * 100.0,
+            a.contour.mspdi_code()
         ));
     }
     s.push_str("  </Assignments>\n</Project>\n");
