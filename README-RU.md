@@ -79,4 +79,24 @@ EOF
 chmod +x "$D/plancraft.desktop"
 cp "$D/plancraft.desktop" ~/.local/share/applications/plancraft.desktop
 ```
+
+```sh
+cat > ~/.local/bin/plancraft-run <<'EOF'
+#!/bin/bash
+BIN="$HOME/.local/bin/plancraft"
+LOG="$HOME/plancraft.log"
+# Пробуем обычный запуск; если не хватает GLIBC — запускаем через ~/glibc
+if "$BIN" --version >/dev/null 2>"$LOG"; then
+  exec "$BIN" "$@" 2>>"$LOG"
+fi
+LD=$(find "$HOME/glibc" -name 'ld-linux-x86-64.so.2' 2>/dev/null | head -1)
+if [ -z "$LD" ]; then echo "Не найден ld-linux в ~/glibc" >>"$LOG"; exit 1; fi
+LIB=$(dirname "$LD")
+exec "$LD" --library-path "$LIB:/usr/lib/x86_64-linux-gnu:/lib/x86_64-linux-gnu" "$BIN" "$@" 2>>"$LOG"
+EOF
+chmod +x ~/.local/bin/plancraft-run
+D=$(xdg-user-dir DESKTOP 2>/dev/null || echo ~/Desktop)
+sed -i "s|^Exec=.*|Exec=$HOME/.local/bin/plancraft-run %f|" "$D/plancraft.desktop" ~/.local/share/applications/plancraft.desktop
+~/.local/bin/plancraft-run
+```
 Если не появилась на рабочем столе
