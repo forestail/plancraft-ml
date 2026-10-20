@@ -63,3 +63,20 @@ cd plancraft-ru-*-linux-x86_64
 ```sh
 cargo build --release -p plancraft-app
 ```
+
+```sh
+D=$(xdg-user-dir DESKTOP 2>/dev/null || echo ~/Desktop); mkdir -p "$D"
+cat > "$D/plancraft.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=PlanCraft
+Comment=Планирование проектов (аналог MS Project)
+Exec=$HOME/.local/bin/plancraft %f
+Icon=$HOME/.local/share/icons/hicolor/256x256/apps/plancraft.png
+Terminal=false
+Categories=Office;ProjectManagement;
+EOF
+chmod +x "$D/plancraft.desktop"
+cp "$D/plancraft.desktop" ~/.local/share/applications/plancraft.desktop
+```
+Если не появилась на рабочем столе
