@@ -88,7 +88,7 @@ pub fn show(ui: &mut Ui, rect: Rect, p: &Project, g: &mut GanttState, chart_widt
             painter.text(
                 pos2(label_x, bar.top() - 7.0),
                 Align2::LEFT_CENTER,
-                unit.label(m, x_of(next) - label_x),
+                unit.label(m, x_of(next) - label_x, false),
                 FontId::proportional(10.5),
                 theme::pal().TEXT_WEAK,
             );

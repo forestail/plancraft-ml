@@ -15,16 +15,18 @@ pub enum Lang {
     #[default]
     En,
     Ru,
+    Ja,
 }
 
 impl Lang {
-    pub const ALL: [Lang; 2] = [Lang::Ru, Lang::En];
+    pub const ALL: [Lang; 3] = [Lang::Ru, Lang::En, Lang::Ja];
 
     /// The language's own name, for a language picker.
     pub fn native_name(self) -> &'static str {
         match self {
             Lang::En => "English",
             Lang::Ru => "Русский",
+            Lang::Ja => "日本語",
         }
     }
 
@@ -36,7 +38,13 @@ impl Lang {
                 if v.is_empty() {
                     continue;
                 }
-                return if v.starts_with("ru") { Lang::Ru } else { Lang::En };
+                return if v.starts_with("ru") {
+                    Lang::Ru
+                } else if v.starts_with("ja") {
+                    Lang::Ja
+                } else {
+                    Lang::En
+                };
             }
         }
         Lang::En
@@ -46,15 +54,30 @@ impl Lang {
 static LANG: AtomicU8 = AtomicU8::new(0);
 
 pub fn set_lang(lang: Lang) {
-    LANG.store(if lang == Lang::Ru { 1 } else { 0 }, Ordering::Relaxed);
+    LANG.store(
+        match lang {
+            Lang::En => 0,
+            Lang::Ru => 1,
+            Lang::Ja => 2,
+        },
+        Ordering::Relaxed,
+    );
 }
 
 pub fn lang() -> Lang {
-    if LANG.load(Ordering::Relaxed) == 1 { Lang::Ru } else { Lang::En }
+    match LANG.load(Ordering::Relaxed) {
+        1 => Lang::Ru,
+        2 => Lang::Ja,
+        _ => Lang::En,
+    }
 }
 
 pub fn is_ru() -> bool {
     lang() == Lang::Ru
+}
+
+pub fn is_ja() -> bool {
+    lang() == Lang::Ja
 }
 
 static EXACT: LazyLock<HashMap<&'static str, &'static str>> =
@@ -79,6 +102,9 @@ static TEMPLATES: LazyLock<Vec<Template>> = LazyLock::new(|| {
 
 /// Translates a fixed interface string.
 pub fn tr(s: &'static str) -> &'static str {
+    if lang() == Lang::Ja {
+        return crate::i18n_ja::translate(s).unwrap_or(s);
+    }
     if !is_ru() {
         return s;
     }
@@ -96,11 +122,19 @@ static REVERSE: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(||
 /// The English original of a translated interface string (for choice lists whose
 /// selected text is matched in code); unknown text is returned unchanged.
 pub fn untr(s: &str) -> &str {
+    if is_ja() {
+        return crate::i18n_ja::untranslate(s);
+    }
     REVERSE.get(s).copied().unwrap_or(s)
 }
 
 /// Translates a formatted interface message.
 pub fn tr_dyn(s: &str) -> String {
+    if lang() == Lang::Ja {
+        return crate::i18n_ja::translate_dynamic(s)
+            .or_else(|| crate::i18n_ja::translate(s).map(str::to_string))
+            .unwrap_or_else(|| s.to_string());
+    }
     if !is_ru() {
         return s.to_string();
     }
@@ -128,7 +162,7 @@ pub fn tr_dyn(s: &str) -> String {
 }
 
 /// Matches `s` against literal `parts` separated by wildcards; returns the wildcard captures.
-fn match_template<'a>(parts: &[&str], s: &'a str) -> Option<Vec<&'a str>> {
+pub(crate) fn match_template<'a>(parts: &[&str], s: &'a str) -> Option<Vec<&'a str>> {
     let (first, rest) = parts.split_first()?;
     let mut tail = s.strip_prefix(first)?;
     let mut caps = Vec::with_capacity(rest.len());
@@ -159,7 +193,17 @@ fn match_template<'a>(parts: &[&str], s: &'a str) -> Option<Vec<&'a str>> {
 /// Short weekday name, Monday = 0.
 pub fn weekday_short(wd: chrono::Weekday) -> &'static str {
     use chrono::Weekday::*;
-    if is_ru() {
+    if is_ja() {
+        match wd {
+            Mon => "月",
+            Tue => "火",
+            Wed => "水",
+            Thu => "木",
+            Fri => "金",
+            Sat => "土",
+            Sun => "日",
+        }
+    } else if is_ru() {
         match wd {
             Mon => "Пн",
             Tue => "Вт",
@@ -185,7 +229,17 @@ pub fn weekday_short(wd: chrono::Weekday) -> &'static str {
 /// One-letter weekday for timescales.
 pub fn weekday_letter(wd: chrono::Weekday) -> &'static str {
     use chrono::Weekday::*;
-    if is_ru() {
+    if is_ja() {
+        match wd {
+            Mon => "月",
+            Tue => "火",
+            Wed => "水",
+            Thu => "木",
+            Fri => "金",
+            Sat => "土",
+            Sun => "日",
+        }
+    } else if is_ru() {
         match wd {
             Mon => "П",
             Tue => "В",
@@ -212,8 +266,15 @@ pub fn weekday_letter(wd: chrono::Weekday) -> &'static str {
 pub fn month_short(m: u32) -> &'static str {
     const EN: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     const RU: [&str; 12] = ["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
+    const JA: [&str; 12] = ["1月", "2月", "3月", "4月", "5月", "6月", "7月", "8月", "9月", "10月", "11月", "12月"];
     let i = (m.clamp(1, 12) - 1) as usize;
-    if is_ru() { RU.get(i).copied().unwrap_or("") } else { EN.get(i).copied().unwrap_or("") }
+    if is_ja() {
+        JA.get(i).copied().unwrap_or("")
+    } else if is_ru() {
+        RU.get(i).copied().unwrap_or("")
+    } else {
+        EN.get(i).copied().unwrap_or("")
+    }
 }
 
 /// Full month name (nominative), January = 1.
@@ -222,8 +283,15 @@ pub fn month_long(m: u32) -> &'static str {
         ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
     const RU: [&str; 12] =
         ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
+    const JA: [&str; 12] = ["1月", "2月", "3月", "4月", "5月", "6月", "7月", "8月", "9月", "10月", "11月", "12月"];
     let i = (m.clamp(1, 12) - 1) as usize;
-    if is_ru() { RU.get(i).copied().unwrap_or("") } else { EN.get(i).copied().unwrap_or("") }
+    if is_ja() {
+        JA.get(i).copied().unwrap_or("")
+    } else if is_ru() {
+        RU.get(i).copied().unwrap_or("")
+    } else {
+        EN.get(i).copied().unwrap_or("")
+    }
 }
 
 /// Parses a decimal number written with either a point or a comma ("1,5" or "1.5").

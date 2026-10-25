@@ -48,12 +48,20 @@ impl Unit {
         }
     }
 
-    pub fn label(self, t: NaiveDateTime, width: f32) -> String {
+    pub fn label(self, t: NaiveDateTime, width: f32, is_top_tier: bool) -> String {
         let d = t.date();
         match self {
             Unit::Hours6 => format!("{:02}", t.hour()),
             Unit::Day => {
-                if width >= 90.0 {
+                if plancraft_core::i18n::is_ja() {
+                    if is_top_tier && width >= 60.0 {
+                        format!("{} ({})", d.format("%-m/%-d"), plancraft_core::i18n::weekday_short(d.weekday()))
+                    } else if width >= 12.0 {
+                        plancraft_core::i18n::weekday_short(d.weekday()).to_string()
+                    } else {
+                        d.format("%-d").to_string()
+                    }
+                } else if width >= 90.0 {
                     crate::format::df(&d, "%a %b %-d")
                 } else if width >= 26.0 {
                     d.format("%-d").to_string()
@@ -62,7 +70,13 @@ impl Unit {
                 }
             }
             Unit::Week => {
-                if width >= 110.0 {
+                if plancraft_core::i18n::is_ja() {
+                    if is_top_tier && width >= 65.0 {
+                        format!("{}週", crate::format::df(&d, "%Y年%-m月%-d日"))
+                    } else {
+                        d.day().to_string()
+                    }
+                } else if width >= 110.0 {
                     crate::tr_dyn(&format!("Week of {}", crate::format::df(&d, "%b %-d, '%y")))
                 } else if width >= 60.0 {
                     crate::format::df(&d, "%b %-d, '%y")
@@ -71,7 +85,15 @@ impl Unit {
                 }
             }
             Unit::Month => {
-                if width >= 90.0 {
+                if plancraft_core::i18n::is_ja() {
+                    if width >= 60.0 {
+                        format!("{}年{}月", d.year(), d.month())
+                    } else if width >= 30.0 {
+                        format!("{}月", d.month())
+                    } else {
+                        d.month().to_string()
+                    }
+                } else if width >= 90.0 {
                     crate::format::df(&d, "%B %Y")
                 } else if width >= 40.0 {
                     crate::format::df(&d, "%b '%y")
@@ -122,7 +144,7 @@ pub fn paint_header(painter: &Painter, rect: Rect, g: &GanttState) -> Vec<(f32, 
             painter.vline(x0.round() + 0.5, y0..=y1, Stroke::new(1.0, theme::pal().GRID_LINE_STRONG));
             let cell = Rect::from_x_y_ranges(x0.max(rect.left())..=x1.min(rect.right()), y0..=y1);
             if cell.width() > 8.0 {
-                let label = unit.label(t, x1 - x0);
+                let label = unit.label(t, x1 - x0, unit == top);
                 let anchor = if collect || x1 - x0 < 60.0 { Align2::CENTER_CENTER } else { Align2::LEFT_CENTER };
                 let pos = if anchor == Align2::CENTER_CENTER { cell.center() } else { pos2(cell.left() + 4.0, cell.center().y) };
                 painter.with_clip_rect(cell).text(pos, anchor, label, font.clone(), theme::pal().TEXT);

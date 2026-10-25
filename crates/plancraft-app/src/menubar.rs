@@ -181,10 +181,17 @@ fn group(ui: &mut Ui, caption: &str, add: impl FnOnce(&mut Ui)) {
     let cap_w = ui.painter().layout_no_wrap(caption.to_string(), FontId::proportional(11.0), theme::pal().TEXT_WEAK).size().x + 12.0;
     let r = ui
         .vertical(|ui| {
+            // The parent ribbon body is inset by 3 px; remove egui's default vertical
+            // item gap so the caption row stays inside the fixed-height body.
+            ui.spacing_mut().item_spacing.y = 0.0;
             ui.set_min_width(cap_w);
             ui.horizontal_top(|ui| {
                 ui.set_height(BODY_H);
                 ui.spacing_mut().item_spacing.x = 2.0;
+                // Combo boxes default to a 28 px hit target. Three stacked rows
+                // then exceed BODY_H and push this group's caption below its peers.
+                ui.spacing_mut().interact_size.y = BUTTON_H;
+                ui.spacing_mut().button_padding.y = 2.0;
                 add(ui);
             });
             ui.add_space(CAPTION_H);
@@ -193,7 +200,10 @@ fn group(ui: &mut Ui, caption: &str, add: impl FnOnce(&mut Ui)) {
         .rect;
     let p = ui.painter().clone();
     p.text(
-        pos2(r.center().x, r.bottom() - CAPTION_H / 2.0),
+        // Anchor captions and separators to the shared ribbon grid, not to the
+        // group's measured height: egui controls can make one group's response
+        // taller than BODY_H even though the visible ribbon is fixed-height.
+        pos2(r.center().x, r.top() + BODY_H + CAPTION_H / 2.0),
         Align2::CENTER_CENTER,
         caption,
         FontId::proportional(11.0),
@@ -201,7 +211,7 @@ fn group(ui: &mut Ui, caption: &str, add: impl FnOnce(&mut Ui)) {
     );
     ui.add_space(4.0);
     let x = ui.cursor().left();
-    p.vline(x, (r.top() + 4.0)..=(r.bottom() - 4.0), Stroke::new(1.0, theme::pal().GRID_LINE_STRONG));
+    p.vline(x, (r.top() + 4.0)..=(r.top() + BODY_H + CAPTION_H - 4.0), Stroke::new(1.0, theme::pal().GRID_LINE_STRONG));
     ui.add_space(6.0);
 }
 

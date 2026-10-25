@@ -47,6 +47,9 @@ pub static RU: &[(&str, &str)] = &[
     ("About PlanCraft", "О программе PlanCraft"),
     ("Exit", "Выход"),
     ("Language", "Язык"),
+    ("Decimal places:", "Знаков после запятой:"),
+    ("Currency:", "Настройки валюты:"),
+    ("digits", "знаков"),
     // ---- Toolbar ----
     ("Save (Ctrl+S)", "Сохранить (Ctrl+S)"),
     ("Undo (Ctrl+Z)", "Отменить (Ctrl+Z)"),

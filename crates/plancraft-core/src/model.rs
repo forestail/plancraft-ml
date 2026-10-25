@@ -809,6 +809,8 @@ pub struct ProjectSettings {
     pub time: TimeSettings,
     pub duration_unit: DurationUnit,
     pub currency: String,
+    /// Number of fractional digits used when displaying monetary values.
+    pub currency_decimals: u8,
     /// Work represented by one complexity point.
     pub minutes_per_point: Minutes,
     /// Tasks with total slack at or below this are critical.
@@ -834,6 +836,7 @@ impl Default for ProjectSettings {
             time: TimeSettings::default(),
             duration_unit: DurationUnit::Days,
             currency: if crate::i18n::is_ru() { "руб." } else { "$" }.into(),
+            currency_decimals: 2,
             minutes_per_point: 4 * 60,
             critical_slack: 0,
             new_tasks_auto: true,

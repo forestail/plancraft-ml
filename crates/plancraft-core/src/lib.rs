@@ -21,6 +21,7 @@ pub mod duration;
 pub mod extras;
 pub mod guard;
 pub mod i18n;
+mod i18n_ja;
 mod i18n_ru;
 pub mod ids;
 pub mod interchange;

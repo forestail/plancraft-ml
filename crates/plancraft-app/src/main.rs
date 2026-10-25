@@ -14,6 +14,7 @@ mod columns;
 mod commands;
 mod dialogs;
 mod edit;
+mod fonts;
 mod format;
 mod logo;
 mod mcp_host;
@@ -90,6 +91,7 @@ fn main() -> anyhow::Result<()> {
     let lang = match std::env::var("PLANCRAFT_LANG").ok().as_deref() {
         Some("en") => plancraft_core::i18n::Lang::En,
         Some("ru") => plancraft_core::i18n::Lang::Ru,
+        Some("ja") => plancraft_core::i18n::Lang::Ja,
         _ => settings::AppSettings::load().language,
     };
     plancraft_core::i18n::set_lang(lang);

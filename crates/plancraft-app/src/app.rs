@@ -27,6 +27,7 @@ pub struct PlanCraftApp {
     st: UiState,
     dialogs: Dialogs,
     settings: AppSettings,
+    font_loaded: bool,
     mcp: McpHost,
     seen: HashMap<u64, u64>,
     status: Option<(String, Instant)>,
@@ -88,6 +89,7 @@ impl PlanCraftApp {
             st,
             dialogs: Dialogs::default(),
             settings,
+            font_loaded: false,
             mcp: McpHost::default(),
             seen: HashMap::new(),
             status: None,
@@ -422,7 +424,13 @@ impl PlanCraftApp {
             Command::History => self.dialogs.history = !self.dialogs.history,
             Command::SetLang(l) => {
                 plancraft_core::i18n::set_lang(l);
+                crate::fonts::install(ctx, &self.settings.font_family);
                 self.settings.language = l;
+                self.settings.save();
+            }
+            Command::SetFont(family) => {
+                crate::fonts::install(ctx, &family);
+                self.settings.font_family = family;
                 self.settings.save();
             }
             Command::SetTheme(t) => {
@@ -1466,7 +1474,7 @@ impl PlanCraftApp {
                 menubar::title_bar(ui, &info, &mut out);
             });
             egui::CentralPanel::no_frame().show(ui, |ui| {
-                if start_page::show(ui, &sinfo, &mut out) {
+                if start_page::show(ui, &sinfo, &mut self.st.font_filter, &mut out) {
                     self.st.start_page = false;
                 }
             });
@@ -1640,6 +1648,10 @@ impl eframe::App for PlanCraftApp {
 
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        if !self.font_loaded {
+            crate::fonts::install(&ctx, &self.settings.font_family);
+            self.font_loaded = true;
+        }
         // Last line of defence: a bug while drawing must never take the user's plans with it.
         if let Err(p) = plancraft_core::guard::catch("drawing the window", || self.frame(ui)) {
             self.after_panic(&ctx, &p.message);

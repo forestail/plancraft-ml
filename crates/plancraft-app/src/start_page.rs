@@ -393,7 +393,7 @@ fn nav_item(ui: &mut Ui, label: &str, selected: bool) -> bool {
 }
 
 /// The File page (backstage): a green command column and the chosen section.
-pub fn show(ui: &mut Ui, info: &StartInfo, out: &mut Vec<Command>) -> bool {
+pub fn show(ui: &mut Ui, info: &StartInfo, font_filter: &mut String, out: &mut Vec<Command>) -> bool {
     let full = ui.max_rect();
     ui.painter().rect_filled(full, 0.0, theme::pal().BG);
     let ctx = ui.ctx().clone();
@@ -552,6 +552,23 @@ pub fn show(ui: &mut Ui, info: &StartInfo, out: &mut Vec<Command>) -> bool {
                                 out.push(Command::SetTheme(t));
                             }
                         }
+                    });
+                    ui.end_row();
+                    ui.label(crate::tr("Font"));
+                    ui.vertical(|ui| {
+                        ui.add(egui::TextEdit::singleline(font_filter).hint_text(crate::tr("Search fonts…")).desired_width(250.0));
+                        let selected = if info.settings.font_family.is_empty() { crate::tr("Default") } else { &info.settings.font_family };
+                        egui::ComboBox::from_id_salt("option_font_family").selected_text(selected).width(250.0).show_ui(ui, |ui| {
+                            if ui.selectable_label(info.settings.font_family.is_empty(), crate::tr("Default")).clicked() {
+                                out.push(Command::SetFont(String::new()));
+                            }
+                            let needle = font_filter.to_lowercase();
+                            for name in crate::fonts::families().iter().filter(|n| n.to_lowercase().contains(&needle)).take(300) {
+                                if ui.selectable_label(info.settings.font_family == *name, name).clicked() {
+                                    out.push(Command::SetFont(name.clone()));
+                                }
+                            }
+                        });
                     });
                     ui.end_row();
                     ui.label(crate::tr("Language"));

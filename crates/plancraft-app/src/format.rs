@@ -54,6 +54,20 @@ fn ru_pattern(pat: &str) -> &str {
 /// Formats a date with a chrono pattern in the interface language.
 pub fn df(d: &impl AsDateTime, pat: &str) -> String {
     let dt = d.as_dt();
+    if i18n::is_ja() {
+        // Localize the requested pattern without adding fields it did not ask for.
+        // In particular, date-only grid cells must stay date-only.
+        let has_weekday = pat.contains("%a");
+        let pat = pat
+            .replace("%a", "")
+            .replace("%b %-d, %Y", "%Y年%-m月%-d日")
+            .replace("%m/%d/%y", "%Y/%m/%d")
+            .replace("%m/%d/%Y", "%Y/%m/%d")
+            .replace("%b", "%-m月")
+            .replace("%B", "%-m月");
+        let formatted = dt.format(&pat).to_string();
+        return if has_weekday { format!("{} {}", formatted.trim(), i18n::weekday_short(dt.weekday())) } else { formatted };
+    }
     if !i18n::is_ru() {
         return dt.format(pat).to_string();
     }
@@ -83,19 +97,38 @@ pub fn day(d: NaiveDate) -> String {
 
 /// Date and time for editing; parsed back by `Project::parse_datetime`.
 pub fn iso(dt: Option<NaiveDateTime>) -> String {
-    let pat = if i18n::is_ru() { "%d.%m.%Y %H:%M" } else { "%Y-%m-%d %H:%M" };
+    let pat = if i18n::is_ja() {
+        "%Y/%m/%d %H:%M"
+    } else if i18n::is_ru() {
+        "%d.%m.%Y %H:%M"
+    } else {
+        "%Y-%m-%d %H:%M"
+    };
     dt.map(|d| d.format(pat).to_string()).unwrap_or_default()
 }
 
 /// A date for editing.
 pub fn iso_date(dt: Option<NaiveDateTime>) -> String {
-    let pat = if i18n::is_ru() { "%d.%m.%Y" } else { "%Y-%m-%d" };
+    let pat = if i18n::is_ja() {
+        "%Y/%m/%d"
+    } else if i18n::is_ru() {
+        "%d.%m.%Y"
+    } else {
+        "%Y-%m-%d"
+    };
     dt.map(|d| d.format(pat).to_string()).unwrap_or_default()
 }
 
 /// A plain date for editing.
 pub fn edit_day(d: NaiveDate) -> String {
-    d.format(if i18n::is_ru() { "%d.%m.%Y" } else { "%Y-%m-%d" }).to_string()
+    d.format(if i18n::is_ja() {
+        "%Y/%m/%d"
+    } else if i18n::is_ru() {
+        "%d.%m.%Y"
+    } else {
+        "%Y-%m-%d"
+    })
+    .to_string()
 }
 
 pub fn money(p: &Project, v: f64) -> String {
@@ -103,9 +136,15 @@ pub fn money(p: &Project, v: f64) -> String {
         return String::new();
     }
     let neg = v < 0.0;
-    let cents = (v.abs() * 100.0).round() as i64;
-    let whole = cents / 100;
-    let frac = cents % 100;
+    let symbol = p.currency();
+    let decimals = p.settings.currency_decimals.min(6);
+    let scale = 10_i64.pow(decimals as u32);
+    let scaled = v.abs() * scale as f64;
+    let nearest = scaled.round();
+    let rounded_value = if (scaled - nearest).abs() <= f64::EPSILON * scaled.abs().max(1.0) * 4.0 { nearest } else { scaled.ceil() };
+    let units = rounded_value as i64;
+    let whole = units / scale;
+    let frac = units % scale;
     let mut s = whole.to_string();
     let mut i = s.len() as isize - 3;
     while i > 0 {
@@ -115,9 +154,11 @@ pub fn money(p: &Project, v: f64) -> String {
     if i18n::is_ru() {
         // 1 234,56 ₽
         let s = s.replace(',', "\u{a0}");
-        return format!("{}{s},{frac:02}\u{a0}{}", if neg { "-" } else { "" }, p.currency());
+        let fraction = if decimals == 0 { String::new() } else { format!(",{frac:0width$}", width = decimals as usize) };
+        return format!("{}{s}{fraction}\u{a0}{symbol}", if neg { "-" } else { "" });
     }
-    format!("{}{}{s}.{frac:02}", if neg { "-" } else { "" }, p.currency())
+    let fraction = if decimals == 0 { String::new() } else { format!(".{frac:0width$}", width = decimals as usize) };
+    format!("{}{symbol}{s}{fraction}", if neg { "-" } else { "" })
 }
 
 pub fn hours(mins: f64) -> String {

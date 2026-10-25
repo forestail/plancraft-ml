@@ -20,6 +20,7 @@ pub struct ProjectInfo {
     status_date: String,
     calendar: CalendarId,
     currency: String,
+    currency_decimals: u8,
     hours_per_day: String,
     hours_per_week: String,
     days_per_month: String,
@@ -49,6 +50,7 @@ impl ProjectInfo {
             status_date: p.status_date.map(format::edit_day).unwrap_or_default(),
             calendar: p.calendar,
             currency: s.currency.clone(),
+            currency_decimals: s.currency_decimals.min(6),
             hours_per_day: format!("{}", s.time.minutes_per_day as f64 / 60.0),
             hours_per_week: format!("{}", s.time.minutes_per_week as f64 / 60.0),
             days_per_month: s.time.days_per_month.to_string(),
@@ -91,7 +93,8 @@ impl ProjectInfo {
         };
         p.calendar = self.calendar;
         let s = &mut p.settings;
-        s.currency = self.currency.clone();
+        s.currency = self.currency.trim().to_string();
+        s.currency_decimals = self.currency_decimals.min(6);
         s.time.minutes_per_day = (num(&self.hours_per_day, crate::tr("Hours per day"))? * 60.0).round() as i64;
         s.time.minutes_per_week = (num(&self.hours_per_week, crate::tr("Hours per week"))? * 60.0).round() as i64;
         s.time.days_per_month = num(&self.days_per_month, crate::tr("Days per month"))?.round() as i64;
@@ -202,12 +205,26 @@ impl ProjectInfo {
                                     }
                                 },
                             );
-                            ui.label(crate::tr("Currency symbol:"));
-                            ui.add(egui::TextEdit::singleline(&mut self.currency).desired_width(40.0));
                             ui.end_row();
                             ui.label(crate::tr("Critical if slack ≤"));
                             ui.add(egui::TextEdit::singleline(&mut self.critical_slack).desired_width(60.0));
                             ui.end_row();
+                        });
+                        ui.add_space(4.0);
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(crate::tr("Currency:")).strong());
+                            ui.label(crate::tr("Currency symbol:"));
+                            ui.add(egui::TextEdit::singleline(&mut self.currency).desired_width(55.0));
+                            ui.label(crate::tr("Decimal places:"));
+                            egui::ComboBox::from_id_salt("pi_currency_decimals").selected_text(self.currency_decimals.to_string()).show_ui(
+                                ui,
+                                |ui| {
+                                    for n in 0..=6 {
+                                        ui.selectable_value(&mut self.currency_decimals, n, n.to_string());
+                                    }
+                                },
+                            );
+                            ui.label(crate::tr("digits"));
                         });
                         ui.checkbox(&mut self.new_auto, crate::tr("New tasks are auto scheduled"));
                         ui.checkbox(

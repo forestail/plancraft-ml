@@ -20,6 +20,8 @@ pub struct AppSettings {
     pub theme: crate::theme::ThemeChoice,
     /// Interface language (Russian by default in this edition).
     pub language: plancraft_core::i18n::Lang,
+    /// Installed font family used for interface text; empty keeps the built-in font.
+    pub font_family: String,
 }
 
 impl Default for AppSettings {
@@ -31,6 +33,7 @@ impl Default for AppSettings {
             table_width: 720.0,
             theme: crate::theme::ThemeChoice::Light,
             language: plancraft_core::i18n::Lang::Ru,
+            font_family: String::new(),
         }
     }
 }

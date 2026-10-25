@@ -89,6 +89,7 @@ pub enum Command {
     History,
     SetTheme(crate::theme::ThemeChoice),
     SetLang(plancraft_core::i18n::Lang),
+    SetFont(String),
     About,
 }
 

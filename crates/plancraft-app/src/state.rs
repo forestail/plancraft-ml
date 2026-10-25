@@ -347,6 +347,7 @@ pub struct UiState {
     pub menu_tab: MenuTab,
     /// The Start Page is shown instead of the views.
     pub start_page: bool,
+    pub font_filter: String,
     pub sel: Selection,
     pub task_grid: GridState,
     pub resource_grid: GridState,
@@ -401,6 +402,7 @@ impl Default for UiState {
             view: ViewKind::Gantt,
             menu_tab: MenuTab::Task,
             start_page: false,
+            font_filter: String::new(),
             sel: Selection::default(),
             task_grid: GridState::default(),
             resource_grid: GridState::default(),
