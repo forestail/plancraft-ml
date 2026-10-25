@@ -109,14 +109,7 @@ pub fn iso(dt: Option<NaiveDateTime>) -> String {
 
 /// A date for editing.
 pub fn iso_date(dt: Option<NaiveDateTime>) -> String {
-    let pat = if i18n::is_ja() {
-        "%Y/%m/%d"
-    } else if i18n::is_ru() {
-        "%d.%m.%Y"
-    } else {
-        "%Y-%m-%d"
-    };
-    dt.map(|d| d.format(pat).to_string()).unwrap_or_default()
+    dt.map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default()
 }
 
 /// A plain date for editing.

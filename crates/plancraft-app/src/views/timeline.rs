@@ -34,7 +34,26 @@ pub fn show(ui: &mut Ui, rect: Rect, p: &Project, g: &mut GanttState, chart_widt
         return;
     };
     let span = (finish - start).num_minutes().max(60) as f32;
-    let bar = Rect::from_min_max(pos2(rect.left() + 90.0, rect.top() + 30.0), pos2(rect.right() - 90.0, rect.top() + 52.0));
+    let date_pattern = if plancraft_core::i18n::is_ja() { "%Y/%m/%d %a" } else { "%a %-m/%-d/%y" };
+    let start_date = crate::format::df(&start, date_pattern);
+    let finish_date = crate::format::df(&finish, date_pattern);
+    let date_font = FontId::proportional(11.5);
+    let label_font = FontId::proportional(10.0);
+    let start_width = painter
+        .layout_no_wrap(start_date.clone(), date_font.clone(), theme::pal().TEXT)
+        .size()
+        .x
+        .max(painter.layout_no_wrap(crate::tr("Start").to_owned(), label_font.clone(), theme::pal().TEXT_WEAK).size().x);
+    let finish_width = painter
+        .layout_no_wrap(finish_date.clone(), date_font.clone(), theme::pal().TEXT)
+        .size()
+        .x
+        .max(painter.layout_no_wrap(crate::tr("Finish").to_owned(), label_font.clone(), theme::pal().TEXT_WEAK).size().x);
+    let label_gap = 10.0;
+    let bar = Rect::from_min_max(
+        pos2(rect.left() + 10.0 + start_width + label_gap, rect.top() + 30.0),
+        pos2(rect.right() - 10.0 - finish_width - label_gap, rect.top() + 52.0),
+    );
     let x_of = |t: NaiveDateTime| bar.left() + (t - start).num_minutes() as f32 / span * bar.width();
     let t_of = |x: f32| start + Duration::minutes(((x - bar.left()) / bar.width() * span) as i64);
 
@@ -46,13 +65,7 @@ pub fn show(ui: &mut Ui, rect: Rect, p: &Project, g: &mut GanttState, chart_widt
         FontId::proportional(10.0),
         theme::pal().TEXT_WEAK,
     );
-    painter.text(
-        pos2(rect.left() + 10.0, bar.center().y + 7.0),
-        Align2::LEFT_CENTER,
-        crate::format::df(&start, "%a %-m/%-d/%y"),
-        FontId::proportional(11.5),
-        theme::pal().TEXT,
-    );
+    painter.text(pos2(rect.left() + 10.0, bar.center().y + 7.0), Align2::LEFT_CENTER, &start_date, date_font.clone(), theme::pal().TEXT);
     painter.text(
         pos2(rect.right() - 10.0, bar.center().y - 7.0),
         Align2::RIGHT_CENTER,
@@ -60,13 +73,7 @@ pub fn show(ui: &mut Ui, rect: Rect, p: &Project, g: &mut GanttState, chart_widt
         FontId::proportional(10.0),
         theme::pal().TEXT_WEAK,
     );
-    painter.text(
-        pos2(rect.right() - 10.0, bar.center().y + 7.0),
-        Align2::RIGHT_CENTER,
-        crate::format::df(&finish, "%a %-m/%-d/%y"),
-        FontId::proportional(11.5),
-        theme::pal().TEXT,
-    );
+    painter.text(pos2(rect.right() - 10.0, bar.center().y + 7.0), Align2::RIGHT_CENTER, &finish_date, date_font, theme::pal().TEXT);
 
     painter.rect_filled(bar, 3.0, theme::pal().TIMELINE_BAND);
     painter.rect_stroke(bar, 3.0, Stroke::new(1.0, theme::pal().ACCENT_LIGHT), StrokeKind::Inside);

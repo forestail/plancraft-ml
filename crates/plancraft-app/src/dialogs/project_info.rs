@@ -8,6 +8,20 @@ use crate::edit::EditExt;
 use crate::format;
 use crate::theme;
 
+fn duration_unit_name(unit: DurationUnit) -> String {
+    if plancraft_core::i18n::is_ja() {
+        return match unit {
+            DurationUnit::Minutes => "分",
+            DurationUnit::Hours => "時",
+            DurationUnit::Days => "日",
+            DurationUnit::Weeks => "週",
+            DurationUnit::Months => "月",
+        }
+        .into();
+    }
+    crate::tr_dyn(&format!("{unit:?}"))
+}
+
 pub struct ProjectInfo {
     name: String,
     manager: String,
@@ -46,7 +60,7 @@ impl ProjectInfo {
             notes: p.notes.clone(),
             attachments: p.attachments.clone(),
             attach_status: None,
-            start: format::iso(Some(p.start)),
+            start: format::edit_day(p.start.date()),
             status_date: p.status_date.map(format::edit_day).unwrap_or_default(),
             calendar: p.calendar,
             currency: s.currency.clone(),
@@ -61,7 +75,7 @@ impl ProjectInfo {
             progress_from_time: s.progress_from_time,
             critical_slack: p.format_duration(s.critical_slack, false),
             from_finish: s.schedule_from_finish,
-            finish: format::iso(s.finish_date.or(p.sched.finish)),
+            finish: s.finish_date.or(p.sched.finish).map(|d| format::edit_day(d.date())).unwrap_or_default(),
             error: None,
         }
     }
@@ -142,17 +156,17 @@ impl ProjectInfo {
                             ui.selectable_value(&mut self.from_finish, true, crate::tr("Project Finish Date"));
                         });
                     ui.label(crate::tr("Status date:"));
-                    ui.add(egui::TextEdit::singleline(&mut self.status_date).hint_text(crate::tr("NA (today)")));
+                    crate::widgets::date_picker::date_input(ui, ui.id().with("project-status-date"), &mut self.status_date, 270.0);
                     ui.end_row();
                     ui.label(crate::tr("Start date:"));
                     if self.from_finish {
                         ui.label(RichText::new(format::date_long(doc.project.sched.start)).color(theme::pal().TEXT_WEAK));
                     } else {
-                        ui.text_edit_singleline(&mut self.start);
+                        crate::widgets::date_picker::date_input(ui, ui.id().with("project-start-date"), &mut self.start, 170.0);
                     }
                     ui.label(crate::tr("Finish date:"));
                     if self.from_finish {
-                        ui.text_edit_singleline(&mut self.finish);
+                        crate::widgets::date_picker::date_input(ui, ui.id().with("project-finish-date"), &mut self.finish, 170.0);
                     } else {
                         ui.label(RichText::new(format::date_long(doc.project.sched.finish)).color(theme::pal().TEXT_WEAK));
                     }
@@ -191,20 +205,17 @@ impl ProjectInfo {
                             ui.add(egui::TextEdit::singleline(&mut self.hours_per_point).desired_width(60.0));
                             ui.end_row();
                             ui.label(crate::tr("Duration shown in:"));
-                            egui::ComboBox::from_id_salt("pi_unit").selected_text(crate::tr_dyn(&format!("{:?}", self.unit))).show_ui(
-                                ui,
-                                |ui| {
-                                    for u in [
-                                        DurationUnit::Minutes,
-                                        DurationUnit::Hours,
-                                        DurationUnit::Days,
-                                        DurationUnit::Weeks,
-                                        DurationUnit::Months,
-                                    ] {
-                                        ui.selectable_value(&mut self.unit, u, crate::tr_dyn(&format!("{u:?}")));
-                                    }
-                                },
-                            );
+                            egui::ComboBox::from_id_salt("pi_unit").selected_text(duration_unit_name(self.unit)).show_ui(ui, |ui| {
+                                for u in [
+                                    DurationUnit::Minutes,
+                                    DurationUnit::Hours,
+                                    DurationUnit::Days,
+                                    DurationUnit::Weeks,
+                                    DurationUnit::Months,
+                                ] {
+                                    ui.selectable_value(&mut self.unit, u, duration_unit_name(u));
+                                }
+                            });
                             ui.end_row();
                             ui.label(crate::tr("Critical if slack ≤"));
                             ui.add(egui::TextEdit::singleline(&mut self.critical_slack).desired_width(60.0));

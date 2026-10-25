@@ -114,7 +114,16 @@ pub fn task_table(
                     }
                 }
             }
-            GridEvent::ContextMenu { pos, .. } => st_context_menu(ui, pos),
+            GridEvent::ContextMenu { row, .. } => {
+                // Resolve the row at the context-menu event itself. Keeping this
+                // together avoids opening the menu against a stale selection if
+                // the separate Select event is not delivered for this click.
+                if let Some(task) = super::task_at(&doc.project, rows, row)
+                    && !st.sel.tasks.contains(&task.id)
+                {
+                    super::select_row(&mut st.sel, &doc.project, rows, row, false, false);
+                }
+            }
             GridEvent::DeleteKey => out.push(Command::DeleteSelection),
             GridEvent::InsertKey => out.push(Command::InsertTask),
             GridEvent::ClickEmpty { .. } => {
@@ -122,6 +131,9 @@ pub fn task_table(
             }
         }
     }
+    output.body_response.context_menu(|ui| {
+        crate::commands::task_context_menu(ui, &mut |command| out.push(command));
+    });
     output
 }
 
@@ -142,42 +154,6 @@ fn group_cell(p: &Project, h: &super::GroupHeader, col: TaskCol, expanded: bool)
         bg: Some(theme::pal().HEADER_BG),
         expander: (col == TaskCol::Name).then_some(expanded),
         ..Default::default()
-    }
-}
-
-fn st_context_menu(ui: &Ui, pos: egui::Pos2) {
-    ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("task_ctx_menu"), pos));
-}
-
-/// Shows the floating context menu requested by the task table, if any.
-pub fn context_menu_popup(ctx: &egui::Context, out: &mut Vec<Command>) {
-    let id = egui::Id::new("task_ctx_menu");
-    let Some(pos) = ctx.data(|d| d.get_temp::<egui::Pos2>(id)) else {
-        return;
-    };
-    let mut close = false;
-    let resp = egui::Area::new(id.with("area")).order(egui::Order::Foreground).fixed_pos(pos).show(ctx, |ui| {
-        egui::Frame::menu(ui.style()).show(ui, |ui| {
-            ui.set_min_width(200.0);
-            crate::commands::task_context_menu(ui, &mut |c| {
-                out.push(c);
-                close = true;
-            });
-        });
-    });
-    let clicked_outside = ctx.input(|i| i.pointer.any_pressed()) && !resp.response.contains_pointer() && resp.response.rect.width() > 0.0;
-    let esc = ctx.input(|i| i.key_pressed(egui::Key::Escape));
-    // The first frame after opening sees the opening click; ignore it.
-    let fresh = ctx.data_mut(|d| {
-        let f = d.get_temp::<bool>(id.with("fresh")).unwrap_or(true);
-        d.insert_temp(id.with("fresh"), false);
-        f
-    });
-    if close || esc || (clicked_outside && !fresh) {
-        ctx.data_mut(|d| {
-            d.remove::<egui::Pos2>(id);
-            d.remove::<bool>(id.with("fresh"));
-        });
     }
 }
 

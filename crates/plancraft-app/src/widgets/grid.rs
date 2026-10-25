@@ -14,6 +14,7 @@ pub enum Editor {
     /// Read-only (double click raises [`GridEvent::Activate`]).
     None,
     Text,
+    Date,
     Choice(Vec<String>),
 }
 
@@ -46,6 +47,10 @@ impl ColumnDef {
     }
     pub fn choice(mut self, options: &[&str]) -> Self {
         self.editor = Editor::Choice(options.iter().map(|s| s.to_string()).collect());
+        self
+    }
+    pub fn date(mut self) -> Self {
+        self.editor = Editor::Date;
         self
     }
 }
@@ -155,6 +160,7 @@ pub struct GridConfig<'a> {
 
 pub struct GridOutput {
     pub events: Vec<GridEvent>,
+    pub body_response: egui::Response,
 }
 
 const ROW_NUM_W: f32 = 34.0;
@@ -447,9 +453,6 @@ pub fn show(
             }
         }
         if body_resp.secondary_clicked() && row < cfg.row_count {
-            if !is_selected(row) {
-                events.push(GridEvent::Select { row, shift: false, ctrl: false });
-            }
             if let Some(c) = col {
                 state.cursor = Some((row, c));
             }
@@ -504,45 +507,63 @@ pub fn show(
                 }
                 edit.started = true;
             }
-            _ => {
+            Editor::None => {}
+            Editor::Text | Editor::Date => {
                 let id = cfg.id.with(("edit", row, c));
                 let mut child = ui.new_child(egui::UiBuilder::new().max_rect(r).layout(egui::Layout::left_to_right(Align::Center)));
                 child.set_clip_rect(clip);
                 body_painter.rect_filled(r, 0.0, theme::pal().BG);
-                let te = egui::TextEdit::singleline(&mut edit.text)
-                    .id(id)
-                    .frame(egui::Frame::NONE)
-                    .margin(egui::Margin::symmetric(4, 2))
-                    .font(cell_font.clone())
-                    .desired_width(r.width() - 4.0)
-                    .horizontal_align(def.align);
-                let resp = child.add(te);
+                let is_date = matches!(editor, Editor::Date);
+                let mut text_response = None;
+                let mut picked_date = None;
+                let mut picker_open = false;
+                child.horizontal(|child| {
+                    let width = if is_date { (r.width() - 28.0).max(40.0) } else { r.width() - 4.0 };
+                    let te = egui::TextEdit::singleline(&mut edit.text)
+                        .id(id)
+                        .frame(egui::Frame::NONE)
+                        .margin(egui::Margin::symmetric(4, 2))
+                        .font(cell_font.clone())
+                        .desired_width(width)
+                        .horizontal_align(def.align);
+                    text_response = Some(child.add(te));
+                    if is_date {
+                        let selected = plancraft_core::i18n::parse_date(&edit.text);
+                        (picked_date, picker_open) =
+                            crate::widgets::date_picker::picker_button(child, cfg.id.with(("date-picker", row, c)), selected);
+                    }
+                });
                 body_painter.rect_stroke(r.shrink(0.5), 0.0, Stroke::new(1.5, theme::pal().ACCENT), StrokeKind::Inside);
-                if !edit.started {
-                    resp.request_focus();
-                    edit.started = true;
-                } else {
-                    let (enter, esc, tab, up, down) = ui.input(|i| {
-                        (
-                            i.key_pressed(Key::Enter),
-                            i.key_pressed(Key::Escape),
-                            i.key_pressed(Key::Tab),
-                            i.key_pressed(Key::ArrowUp),
-                            i.key_pressed(Key::ArrowDown),
-                        )
-                    });
-                    if esc {
-                        finished = Some((false, None));
-                    } else if enter {
-                        finished = Some((true, Some((1, 0))));
-                    } else if tab {
-                        finished = Some((true, Some((0, if shift { -1 } else { 1 }))));
-                    } else if up && resp.has_focus() {
-                        finished = Some((true, Some((-1, 0))));
-                    } else if down && resp.has_focus() {
-                        finished = Some((true, Some((1, 0))));
-                    } else if resp.lost_focus() {
-                        finished = Some((true, None));
+                if let Some(day) = picked_date {
+                    edit.text = day.format("%Y-%m-%d").to_string();
+                    finished = Some((true, None));
+                } else if let Some(resp) = text_response {
+                    if !edit.started {
+                        resp.request_focus();
+                        edit.started = true;
+                    } else {
+                        let (enter, esc, tab, up, down) = ui.input(|i| {
+                            (
+                                i.key_pressed(Key::Enter),
+                                i.key_pressed(Key::Escape),
+                                i.key_pressed(Key::Tab),
+                                i.key_pressed(Key::ArrowUp),
+                                i.key_pressed(Key::ArrowDown),
+                            )
+                        });
+                        if esc {
+                            finished = Some((false, None));
+                        } else if enter {
+                            finished = Some((true, Some((1, 0))));
+                        } else if tab {
+                            finished = Some((true, Some((0, if shift { -1 } else { 1 }))));
+                        } else if up && resp.has_focus() {
+                            finished = Some((true, Some((-1, 0))));
+                        } else if down && resp.has_focus() {
+                            finished = Some((true, Some((1, 0))));
+                        } else if resp.lost_focus() && (!is_date || !picker_open) {
+                            finished = Some((true, None));
+                        }
                     }
                 }
             }
@@ -623,7 +644,7 @@ pub fn show(
             && def.editor != Editor::None
         {
             if let Some(t) = typed.filter(|t| !t.trim().is_empty()) {
-                if matches!(def.editor, Editor::Text) {
+                if matches!(def.editor, Editor::Text | Editor::Date) {
                     state.begin_edit(r, c, t);
                     if let Some(e) = state.editing.as_mut() {
                         // Place cursor at end of the typed text.
@@ -666,5 +687,5 @@ pub fn show(
         );
     }
 
-    GridOutput { events }
+    GridOutput { events, body_response: body_resp }
 }

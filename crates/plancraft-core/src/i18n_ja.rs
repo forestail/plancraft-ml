@@ -3,6 +3,8 @@
 const DYNAMIC: &[(&str, &str)] = &[
     ("Undo {} (Ctrl+Z)", "元に戻す {} (Ctrl+Z)"),
     ("{} - PlanCraft", "{} - PlanCraft"),
+    ("Do you want to save changes to {}?", "「{}」への変更を保存しますか？"),
+    ("{}/hr", "{}/時間"),
     (
         "AI agents can control this window via MCP at {}\nClick to manage.",
         "AI エージェントは MCP 経由でこのウィンドウを操作できます: {}\nクリックして管理します。",
@@ -94,6 +96,7 @@ pub fn translate(s: &str) -> Option<&'static str> {
         "Resource Usage" => "リソース配分状況",
         "Resource Sheet" => "リソース シート",
         "Calendar" => "カレンダー",
+        "Choose date" => "日付を選択",
         "Team Planner" => "チーム プランナー",
         "Milestones" => "マイルストーン",
         "Workload" => "作業負荷",

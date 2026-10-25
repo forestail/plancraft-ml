@@ -1526,7 +1526,6 @@ impl PlanCraftApp {
                     ViewKind::Timesheet => views::timesheet::show(ui, rect, doc, st),
                 }
             });
-            views::gantt::context_menu_popup(&ctx, &mut out);
         }
 
         // Dialogs.

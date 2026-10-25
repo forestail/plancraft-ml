@@ -65,6 +65,15 @@ impl DurationUnit {
     }
 
     fn label(self, plural: bool) -> &'static str {
+        if crate::i18n::is_ja() {
+            return match self {
+                DurationUnit::Minutes => "分",
+                DurationUnit::Hours => "時間",
+                DurationUnit::Days => "日",
+                DurationUnit::Weeks => "週間",
+                DurationUnit::Months => "か月",
+            };
+        }
         if crate::i18n::is_ru() {
             return match self {
                 DurationUnit::Minutes => "мин",
@@ -163,6 +172,11 @@ pub fn parse_duration(text: &str, default_unit: DurationUnit, s: &TimeSettings) 
         "д" | "дн" | "дн." | "день" | "дня" | "дней" => DurationUnit::Days,
         "н" | "нед" | "нед." | "неделя" | "недели" | "недель" => DurationUnit::Weeks,
         "мес" | "мес." | "месяц" | "месяца" | "месяцев" => DurationUnit::Months,
+        "分" => DurationUnit::Minutes,
+        "時" | "時間" => DurationUnit::Hours,
+        "日" => DurationUnit::Days,
+        "週" | "週間" => DurationUnit::Weeks,
+        "月" | "か月" | "ヶ月" => DurationUnit::Months,
         _ => return None,
     };
     Some((to_minutes(value * unit.minutes(s) as f64)?, estimated))

@@ -326,11 +326,16 @@ pub fn parse_date(text: &str) -> Option<chrono::NaiveDate> {
     }
     if t.contains('/') {
         let mut it = t.split('/');
-        let m: u32 = it.next()?.parse().ok()?;
-        let d: u32 = it.next()?.parse().ok()?;
-        let y: i32 = it.next()?.parse().ok()?;
-        let y = if y < 100 { 2000 + y } else { y };
-        return NaiveDate::from_ymd_opt(y, m, d);
+        let a = it.next()?;
+        let b: u32 = it.next()?.parse().ok()?;
+        let c: u32 = it.next()?.parse().ok()?;
+        if a.len() == 4 {
+            let y: i32 = a.parse().ok()?;
+            return NaiveDate::from_ymd_opt(y, b, c);
+        }
+        let m: u32 = a.parse().ok()?;
+        let y = if c < 100 { 2000 + c as i32 } else { c as i32 };
+        return NaiveDate::from_ymd_opt(y, m, b);
     }
     None
 }
