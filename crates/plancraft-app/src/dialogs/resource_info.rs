@@ -59,7 +59,7 @@ impl ResourceInfo {
     pub fn show(&mut self, ctx: &Context, doc: &mut Document) -> bool {
         let mut open = true;
         let mut close = false;
-        egui::Window::new(crate::tr("Resource Information"))
+        super::window(ctx, crate::tr("Resource Information"))
             .id(egui::Id::new("resource_info"))
             .pivot(egui::Align2::CENTER_TOP)
             .default_pos(ctx.content_rect().center_top() + egui::vec2(0.0, 120.0))
@@ -67,14 +67,14 @@ impl ResourceInfo {
             .collapsible(false)
             .default_width(560.0)
             .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    for (t, l) in [(Tab::General, crate::tr("General")), (Tab::TimeOff, crate::tr("Time Off & Working Time")), (Tab::Availability, crate::tr("Availability")), (Tab::Notes, crate::tr("Notes"))] {
-                        ui.selectable_value(&mut self.tab, t, l);
-                    }
-                });
-                ui.separator();
+                super::tabs(ui, &mut self.tab, &[
+                    (Tab::General, crate::tr("General")),
+                    (Tab::TimeOff, crate::tr("Time Off & Working Time")),
+                    (Tab::Availability, crate::tr("Availability")),
+                    (Tab::Notes, crate::tr("Notes")),
+                ]);
                 let r = &mut self.draft;
-                match self.tab {
+                egui::ScrollArea::vertical().max_height(320.0).auto_shrink([false, false]).show(ui, |ui| match self.tab {
                     Tab::General => {
                         egui::Grid::new("ri_gen").num_columns(4).spacing([12.0, 8.0]).show(ui, |ui| {
                             ui.label(crate::tr("Resource name:"));
@@ -228,12 +228,12 @@ impl ResourceInfo {
                             self.error = Some(m);
                         }
                     }
-                }
+                });
                 if let Some(e) = &self.error {
                     ui.colored_label(theme::pal().ERROR, e);
                 }
                 ui.separator();
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.allocate_ui_with_layout(egui::vec2(ui.available_width(), 34.0), egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button(crate::tr("Cancel")).clicked() {
                         close = true;
                     }

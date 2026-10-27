@@ -30,7 +30,7 @@ impl AssignResources {
         let mut open = true;
         let tasks: Vec<TaskId> =
             doc.project.tasks.iter().filter(|t| sel.tasks.contains(&t.id) && !t.sched.is_summary).map(|t| t.id).collect();
-        egui::Window::new(crate::tr("Assign Resources")).id(egui::Id::new("assign_resources"))
+        super::window(ctx, crate::tr("Assign Resources")).id(egui::Id::new("assign_resources"))
             .pivot(egui::Align2::CENTER_TOP)
             .default_pos(ctx.content_rect().center_top() + egui::vec2(0.0, 120.0)).open(&mut open).default_width(480.0).show(ctx, |ui| {
             let label = match tasks.as_slice() {
@@ -107,7 +107,7 @@ impl AssignResources {
 pub fn statistics(ctx: &Context, doc: &Document, open: &mut bool) {
     let p = &doc.project;
     let s = report::project_stats(p);
-    egui::Window::new(crate::tr_dyn(&format!("Project Statistics for '{}'", p.name)))
+    super::window(ctx, crate::tr_dyn(&format!("Project Statistics for '{}'", p.name)))
         .id(egui::Id::new("stats"))
         .pivot(egui::Align2::CENTER_TOP)
         .default_pos(ctx.content_rect().center_top() + egui::vec2(0.0, 120.0))
@@ -228,7 +228,7 @@ pub struct ExternalLinks {
 impl ExternalLinks {
     pub fn show(&mut self, ctx: &Context, doc: &mut Document, st: &mut UiState) -> bool {
         let mut open = true;
-        egui::Window::new(crate::tr("Links Between Projects")).id(egui::Id::new("external_links"))
+        super::window(ctx, crate::tr("Links Between Projects")).id(egui::Id::new("external_links"))
             .pivot(egui::Align2::CENTER_TOP)
             .default_pos(ctx.content_rect().center_top() + egui::vec2(0.0, 120.0)).open(&mut open).default_width(640.0).show(ctx, |ui| {
             ui.label(crate::tr("Tasks and milestones can depend on tasks stored in other PlanCraft files. Linked dates are cached in this file and refreshed when it opens."));
@@ -349,7 +349,7 @@ impl ExternalLinks {
 // ---------------------------------------------------------------------------
 
 pub fn about(ctx: &Context, open: &mut bool) {
-    egui::Window::new(crate::tr("About PlanCraft"))
+    super::window(ctx, crate::tr("About PlanCraft"))
         .id(egui::Id::new("about"))
         .pivot(egui::Align2::CENTER_TOP)
         .default_pos(ctx.content_rect().center_top() + egui::vec2(0.0, 120.0))
@@ -372,7 +372,7 @@ pub fn about(ctx: &Context, open: &mut bool) {
 }
 
 pub fn history(ctx: &Context, doc: &mut Document, open: &mut bool) {
-    egui::Window::new(crate::tr("Undo History"))
+    super::window(ctx, crate::tr("Undo History"))
         .id(egui::Id::new("history"))
         .pivot(egui::Align2::CENTER_TOP)
         .default_pos(ctx.content_rect().center_top() + egui::vec2(0.0, 120.0))
@@ -422,7 +422,7 @@ pub fn templates_dir() -> Option<PathBuf> {
 
 pub fn templates(ctx: &Context, open: &mut bool, out: &mut Vec<crate::commands::Command>) {
     use crate::commands::Command;
-    egui::Window::new(crate::tr("Project Templates"))
+    super::window(ctx, crate::tr("Project Templates"))
         .id(egui::Id::new("templates_window"))
         .pivot(egui::Align2::CENTER_TOP)
         .default_pos(ctx.content_rect().center_top() + egui::vec2(0.0, 120.0))

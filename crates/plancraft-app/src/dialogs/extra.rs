@@ -13,7 +13,7 @@ use crate::theme;
 
 fn window(title: String, id: &str, ctx: &Context, open: &mut bool) -> egui::Window<'static> {
     let _ = open;
-    egui::Window::new(title)
+    super::window(ctx, title)
         .id(egui::Id::new(id.to_string()))
         .pivot(egui::Align2::CENTER_TOP)
         .default_pos(ctx.content_rect().center_top() + egui::vec2(0.0, 120.0))
@@ -26,7 +26,7 @@ fn ok_cancel(ui: &mut egui::Ui) -> (bool, bool) {
     let mut ok = false;
     let mut cancel = false;
     ui.separator();
-    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+    ui.allocate_ui_with_layout(egui::vec2(ui.available_width(), 34.0), egui::Layout::right_to_left(egui::Align::Center), |ui| {
         if ui.button(crate::tr("Cancel")).clicked() {
             cancel = true;
         }

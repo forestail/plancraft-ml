@@ -129,7 +129,7 @@ impl ProjectInfo {
     pub fn show(&mut self, ctx: &Context, doc: &mut Document) -> bool {
         let mut open = true;
         let mut close = false;
-        egui::Window::new(crate::tr_dyn(&format!("Project Information for '{}'", doc.project.name)))
+        super::window(ctx, crate::tr_dyn(&format!("Project Information for '{}'", doc.project.name)))
             .id(egui::Id::new("project_info"))
             .pivot(egui::Align2::CENTER_TOP)
             .default_pos(ctx.content_rect().center_top() + egui::vec2(0.0, 120.0))
@@ -248,20 +248,26 @@ impl ProjectInfo {
                     ui.colored_label(theme::pal().ERROR, e);
                 }
                 ui.separator();
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button(crate::tr("Cancel")).clicked() {
-                        close = true;
-                    }
-                    if ui
-                        .add(egui::Button::new(RichText::new(crate::tr("  OK  ")).color(egui::Color32::WHITE)).fill(theme::pal().ACCENT))
-                        .clicked()
-                    {
-                        match doc.edit_msg(crate::tr("Project Information"), |p| self.apply(p)) {
-                            Ok(()) => close = true,
-                            Err(e) => self.error = Some(e),
+                ui.allocate_ui_with_layout(
+                    egui::vec2(ui.available_width(), 34.0),
+                    egui::Layout::right_to_left(egui::Align::Center),
+                    |ui| {
+                        if ui.button(crate::tr("Cancel")).clicked() {
+                            close = true;
                         }
-                    }
-                });
+                        if ui
+                            .add(
+                                egui::Button::new(RichText::new(crate::tr("  OK  ")).color(egui::Color32::WHITE)).fill(theme::pal().ACCENT),
+                            )
+                            .clicked()
+                        {
+                            match doc.edit_msg(crate::tr("Project Information"), |p| self.apply(p)) {
+                                Ok(()) => close = true,
+                                Err(e) => self.error = Some(e),
+                            }
+                        }
+                    },
+                );
             });
         open && !close
     }

@@ -317,15 +317,17 @@ impl TaskInfo {
         } else {
             crate::tr("Task Information")
         };
-        egui::Window::new(title)
+        let frame = egui::Frame::window(&ctx.style_of(ctx.theme())).inner_margin(egui::Margin::symmetric(10, 4));
+        egui::Window::new(RichText::new(title).size(16.0).strong())
             .id(egui::Id::new("task_info_dialog"))
+            .frame(frame)
             .pivot(egui::Align2::CENTER_TOP)
             .default_pos(ctx.content_rect().center_top() + egui::vec2(0.0, 120.0))
             .open(&mut open)
             .collapsible(false)
             .resizable(true)
             .default_width(620.0)
-            .min_height(420.0)
+            .min_height(340.0)
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(crate::tr("Name:"));
@@ -335,24 +337,19 @@ impl TaskInfo {
                     ui.checkbox(&mut self.estimated, crate::tr("Estimated"));
                 });
                 ui.add_space(4.0);
-                ui.horizontal(|ui| {
-                    let mut tabs = vec![
-                        (Tab::General, crate::tr("General")),
-                        (Tab::Predecessors, crate::tr("Predecessors")),
-                        (Tab::Resources, crate::tr("Resources")),
-                        (Tab::Advanced, crate::tr("Advanced")),
-                        (Tab::Estimate, crate::tr("Estimate")),
-                    ];
-                    if self.milestone {
-                        tabs.push((Tab::Milestone, crate::tr("Milestone")));
-                    }
-                    tabs.push((Tab::Notes, crate::tr("Notes")));
-                    for (t, l) in tabs {
-                        ui.selectable_value(&mut self.tab, t, l);
-                    }
-                });
-                ui.separator();
-                egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| match self.tab {
+                let mut tabs = vec![
+                    (Tab::General, crate::tr("General")),
+                    (Tab::Predecessors, crate::tr("Predecessors")),
+                    (Tab::Resources, crate::tr("Resources")),
+                    (Tab::Advanced, crate::tr("Advanced")),
+                    (Tab::Estimate, crate::tr("Estimate")),
+                ];
+                if self.milestone {
+                    tabs.push((Tab::Milestone, crate::tr("Milestone")));
+                }
+                tabs.push((Tab::Notes, crate::tr("Notes")));
+                super::tabs(ui, &mut self.tab, &tabs);
+                egui::ScrollArea::vertical().max_height(320.0).auto_shrink([false, false]).show(ui, |ui| match self.tab {
                     Tab::General => self.general(ui, &doc.project),
                     Tab::Predecessors => self.predecessors(ui, &doc.project),
                     Tab::Resources => self.resources_tab(ui, &doc.project),
@@ -371,21 +368,28 @@ impl TaskInfo {
                     ui.colored_label(theme::pal().ERROR, e);
                 }
                 ui.separator();
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button(crate::tr("Cancel")).clicked() {
-                        close = true;
-                    }
-                    if ui
-                        .add(egui::Button::new(RichText::new(crate::tr("  OK  ")).color(egui::Color32::WHITE)).fill(theme::pal().ACCENT))
-                        .clicked()
-                    {
-                        let label = crate::tr_dyn(&format!("Task Information: {}", self.name));
-                        match doc.edit_msg(&label, |p| self.apply(p)) {
-                            Ok(()) => close = true,
-                            Err(e) => self.error = Some(e),
+                ui.allocate_ui_with_layout(
+                    egui::vec2(ui.available_width(), 34.0),
+                    egui::Layout::right_to_left(egui::Align::Center),
+                    |ui| {
+                        if ui.add_sized([84.0, 30.0], egui::Button::new(crate::tr("Cancel"))).clicked() {
+                            close = true;
                         }
-                    }
-                });
+                        if ui
+                            .add_sized(
+                                [84.0, 30.0],
+                                egui::Button::new(RichText::new(crate::tr("OK")).color(egui::Color32::WHITE)).fill(theme::pal().ACCENT),
+                            )
+                            .clicked()
+                        {
+                            let label = crate::tr_dyn(&format!("Task Information: {}", self.name));
+                            match doc.edit_msg(&label, |p| self.apply(p)) {
+                                Ok(()) => close = true,
+                                Err(e) => self.error = Some(e),
+                            }
+                        }
+                    },
+                );
             });
         open && !close
     }

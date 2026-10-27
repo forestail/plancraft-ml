@@ -41,7 +41,7 @@ pub fn show(
     settings: &mut AppSettings,
     ws: &plancraft_core::workspace::SharedWorkspace,
 ) {
-    egui::Window::new(crate::tr("AI Agents — MCP Server")).id(egui::Id::new("mcp_panel"))
+    super::window(ctx, crate::tr("AI Agents — MCP Server")).id(egui::Id::new("mcp_panel"))
             .pivot(egui::Align2::CENTER_TOP)
             .default_pos(ctx.content_rect().center_top() + egui::vec2(0.0, 120.0)).open(open).default_width(600.0).show(ctx, |ui| {
         ui.label(crate::tr("PlanCraft includes a Model Context Protocol (MCP) server. AI agents such as Claude Code can read and edit every part of your projects: tasks, milestones, dependencies, resources, calendars, time tracking, workload and leveling."));
