@@ -347,6 +347,7 @@ pub struct UiState {
     pub menu_tab: MenuTab,
     /// The Start Page is shown instead of the views.
     pub start_page: bool,
+    pub print_preview: bool,
     pub font_filter: String,
     pub sel: Selection,
     pub task_grid: GridState,
@@ -368,6 +369,8 @@ pub struct UiState {
     pub calendar_month: NaiveDate,
     pub toasts: Vec<Toast>,
     pub clipboard: Vec<Task>,
+    /// System clipboard text identifying our task-row snapshot (not a cell copy).
+    pub task_clipboard_text: Option<String>,
     pub show_history: bool,
     /// Threshold typed for "Cost greater than", "Work greater than" (hours) or "Starting soon" (days).
     pub filter_value: String,
@@ -402,6 +405,7 @@ impl Default for UiState {
             view: ViewKind::Gantt,
             menu_tab: MenuTab::Task,
             start_page: false,
+            print_preview: false,
             font_filter: String::new(),
             sel: Selection::default(),
             task_grid: GridState::default(),
@@ -423,6 +427,7 @@ impl Default for UiState {
             calendar_month: today.with_day(1).unwrap_or(today),
             toasts: Vec::new(),
             clipboard: Vec::new(),
+            task_clipboard_text: None,
             show_history: false,
             filter_value: String::new(),
             sort: plancraft_core::extras::SortKey::Id,

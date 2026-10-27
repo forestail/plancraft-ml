@@ -20,6 +20,7 @@ pub enum Command {
     ExportCsv,
     Import,
     ExportXml,
+    PrintGantt,
     Templates,
     SaveTemplate,
     NewFromTemplate(plancraft_core::templates::Template),

@@ -46,6 +46,7 @@ pub fn task_table(
         header_height: theme::HEADER_HEIGHT,
         row_height: theme::ROW_HEIGHT,
         row_label: Some(&row_label),
+        spreadsheet: true,
     };
     let output = {
         let p = &doc.project;
@@ -94,6 +95,9 @@ pub fn task_table(
                 let (Some(&column), Some(def)) = (cols.get(col), defs.get(col)) else { continue };
                 if row < rows.len() {
                     let Some(id) = super::task_at(&doc.project, rows, row).map(|t| t.id) else { continue };
+                    if !columns::can_edit(column, &doc.project, id) {
+                        continue;
+                    }
                     let label = crate::tr_dyn(&format!("Edit {}", def.title));
                     if let Err(e) = doc.edit_msg(&label, |p| columns::commit(column, p, id, &text)) {
                         st.toast(ToastKind::Error, e);
@@ -114,6 +118,7 @@ pub fn task_table(
                     }
                 }
             }
+            GridEvent::PasteCells { row, col, text } => super::gantt_cells::paste(doc, st, rows, &cols, row, col, &text),
             GridEvent::ContextMenu { row, .. } => {
                 // Resolve the row at the context-menu event itself. Keeping this
                 // together avoids opening the menu against a stale selection if
@@ -204,7 +209,7 @@ pub fn apply_chart_actions(doc: &mut Document, st: &mut UiState, rows: &[usize],
             ChartAction::Select { task, shift, ctrl } => {
                 if let Some(r) = rows.iter().position(|&i| doc.project.tasks.get(i).is_some_and(|t| t.id == task)) {
                     super::select_row(&mut st.sel, &doc.project, rows, r, shift, ctrl);
-                    st.task_grid.cursor = Some((r, st.task_grid.cursor.map(|c| c.1).unwrap_or(2)));
+                    st.task_grid.select_row(r, shift);
                 } else {
                     st.sel.select_task(task);
                 }

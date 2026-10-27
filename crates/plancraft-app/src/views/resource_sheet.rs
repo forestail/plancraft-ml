@@ -319,6 +319,7 @@ pub fn show(ui: &mut Ui, rect: Rect, doc: &mut Document, st: &mut UiState, out: 
         header_height: 30.0,
         row_height: theme::ROW_HEIGHT,
         row_label: Some(&row_label),
+        spreadsheet: false,
     };
     let output = {
         let p = &doc.project;
@@ -392,6 +393,7 @@ pub fn show(ui: &mut Ui, rect: Rect, doc: &mut Document, st: &mut UiState, out: 
                 }
             }
             GridEvent::ClickEmpty { .. } => st.sel.resources.clear(),
+            GridEvent::PasteCells { .. } => {}
             GridEvent::ToggleExpand(row) => {
                 if let Some(h) = header_of(row) {
                     let l = h.label.clone();

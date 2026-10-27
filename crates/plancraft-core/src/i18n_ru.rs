@@ -3,6 +3,8 @@
 //! Keys may contain `{}` placeholders (see `i18n::tr_dyn`).
 
 pub static RU: &[(&str, &str)] = &[
+    ("Print Gantt…", "Печать диаграммы Ганта…"),
+    ("Preview and print the Gantt chart", "Предварительный просмотр и печать диаграммы Ганта"),
     // ---- Views ----
     ("Gantt Chart", "Диаграмма Ганта"),
     ("Tracking Gantt", "Диаграмма Ганта с отслеживанием"),

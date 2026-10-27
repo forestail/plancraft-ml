@@ -71,6 +71,8 @@ pub struct Cell {
     pub tooltip: Option<String>,
     /// Value placed in the editor when editing starts (defaults to `text`).
     pub edit_text: Option<String>,
+    /// Per-row editability, for calculated dates, summaries and similar fields.
+    pub read_only: bool,
 }
 
 impl Cell {
@@ -99,11 +101,59 @@ pub struct GridState {
     pub widths: Vec<f32>,
     /// Row that should be scrolled into view on the next frame.
     pub scroll_to: Option<usize>,
+    pub selection: Option<GridSelection>,
+    /// Active pointer-drag origin; selection survives after the pointer is released.
+    pub drag_origin: Option<Pos2>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GridSelection {
+    Rows { anchor: usize, focus: usize },
+    Cells { anchor: (usize, usize), focus: (usize, usize) },
 }
 
 impl GridState {
-    pub fn begin_edit(&mut self, row: usize, col: usize, text: String) {
+    pub fn rows_selected(&self) -> bool {
+        matches!(self.selection, Some(GridSelection::Rows { .. }))
+    }
+
+    /// Inclusive cell range in display order. Row selection has no cell rectangle.
+    pub fn cell_bounds(&self) -> Option<(usize, usize, usize, usize)> {
+        match self.selection {
+            Some(GridSelection::Cells { anchor: (ar, ac), focus: (fr, fc) }) => Some((ar.min(fr), ac.min(fc), ar.max(fr), ac.max(fc))),
+            Some(GridSelection::Rows { .. }) => None,
+            None => self.cursor.map(|(r, c)| (r, c, r, c)),
+        }
+    }
+
+    pub fn select_cell(&mut self, row: usize, col: usize, extend: bool) {
+        let anchor = if extend {
+            match self.selection {
+                Some(GridSelection::Cells { anchor, .. }) => anchor,
+                _ => self.cursor.unwrap_or((row, col)),
+            }
+        } else {
+            (row, col)
+        };
         self.cursor = Some((row, col));
+        self.selection = Some(GridSelection::Cells { anchor, focus: (row, col) });
+    }
+
+    pub fn select_row(&mut self, row: usize, extend: bool) {
+        let anchor = if extend {
+            match self.selection {
+                Some(GridSelection::Rows { anchor, .. }) => anchor,
+                _ => self.cursor.map_or(row, |(r, _)| r),
+            }
+        } else {
+            row
+        };
+        self.cursor = Some((row, self.cursor.map_or(2, |(_, c)| c)));
+        self.selection = Some(GridSelection::Rows { anchor, focus: row });
+    }
+
+    pub fn begin_edit(&mut self, row: usize, col: usize, text: String) {
+        self.select_cell(row, col, false);
         self.editing = Some(Edit { row, col, text, started: false });
     }
 }
@@ -122,6 +172,12 @@ pub enum GridEvent {
         col: Option<usize>,
     },
     Commit {
+        row: usize,
+        col: usize,
+        text: String,
+    },
+    /// A whole clipboard rectangle, applied as one undoable edit by task views.
+    PasteCells {
         row: usize,
         col: usize,
         text: String,
@@ -156,6 +212,8 @@ pub struct GridConfig<'a> {
     pub row_height: f32,
     /// Text in the row-number column (default: the row number); an empty string leaves it blank.
     pub row_label: Option<&'a dyn Fn(usize) -> String>,
+    /// Distinguish row headers from rectangular cell selections and TSV pastes.
+    pub spreadsheet: bool,
 }
 
 pub struct GridOutput {
@@ -309,7 +367,7 @@ pub fn show(
         let y = body.top() + row as f32 * cfg.row_height - state.scroll_y;
         let row_rect = Rect::from_min_size(pos2(body.left(), y), vec2(body.width(), cfg.row_height));
         let data_row = row < cfg.row_count;
-        let selected = data_row && is_selected(row);
+        let selected = data_row && is_selected(row) && (!cfg.spreadsheet || !matches!(state.selection, Some(GridSelection::Cells { .. })));
         if selected {
             body_painter.rect_filled(row_rect, 0.0, theme::pal().SELECTION);
         }
@@ -320,10 +378,13 @@ pub fn show(
             }
             let clip = r.intersect(Rect::from_min_max(pos2(body.left() + rn_w, body.top()), body.max));
             let cp = body_painter.with_clip_rect(clip);
-            let cursor_here = state.cursor == Some((row, c));
+            let cursor_here = state.cursor == Some((row, c)) && (!cfg.spreadsheet || !state.rows_selected());
             let content = if data_row { cell(row, c) } else { Cell::default() };
             if let Some(bg) = content.bg {
                 cp.rect_filled(r, 0.0, bg);
+            }
+            if cfg.spreadsheet && state.cell_bounds().is_some_and(|(r0, c0, r1, c1)| row >= r0 && row <= r1 && c >= c0 && c <= c1) {
+                cp.rect_filled(r, 0.0, theme::pal().SELECTION);
             }
             if cursor_here {
                 cp.rect_filled(r, 0.0, theme::pal().SELECTION_CELL);
@@ -410,12 +471,23 @@ pub fn show(
     }
 
     // ---- Mouse ----
-    let (shift, ctrl) = ui.input(|i| (i.modifiers.shift, i.modifiers.command));
-    let hit = |p: Pos2| -> Option<(usize, Option<usize>)> {
+    let (shift, ctrl) = ui.input(|i| {
+        let modifiers = i
+            .events
+            .iter()
+            .rev()
+            .find_map(|event| match event {
+                egui::Event::PointerButton { modifiers, pressed: false, .. } => Some(*modifiers),
+                _ => None,
+            })
+            .unwrap_or(i.modifiers);
+        (modifiers.shift, modifiers.command)
+    });
+    let hit = |p: Pos2, offset: f32| -> Option<(usize, Option<usize>)> {
         if !body.contains(p) {
             return None;
         }
-        let row = ((p.y - body.top() + state.scroll_y) / cfg.row_height).floor() as usize;
+        let row = (((p.y - body.top() + offset) / cfg.row_height).floor() as usize).min(total_rows.saturating_sub(1));
         let col = spans.iter().position(|&(x0, x1)| p.x >= x0 && p.x < x1 && p.x >= body.left() + rn_w);
         Some((row, col))
     };
@@ -423,23 +495,36 @@ pub fn show(
         body_resp.request_focus();
     }
     if let Some(p) = body_resp.interact_pointer_pos()
-        && let Some((row, col)) = hit(p)
+        && let Some((row, col)) = hit(p, state.scroll_y)
     {
         if body_resp.clicked() {
+            if cfg.spreadsheet {
+                if let Some(c) = col {
+                    state.select_cell(row, c, shift);
+                } else {
+                    state.select_row(row, shift);
+                }
+            }
             if row >= cfg.row_count {
-                state.cursor = col.map(|c| (row, c));
+                if !cfg.spreadsheet {
+                    state.cursor = col.map(|c| (row, c));
+                }
                 events.push(GridEvent::ClickEmpty { row });
             } else {
                 if let Some(c) = col {
                     state.cursor = Some((row, c));
                 }
                 // Clicking another cell commits the current edit (handled below via focus loss).
-                events.push(GridEvent::Select { row, shift, ctrl });
+                events.push(GridEvent::Select { row, shift: shift && (!cfg.spreadsheet || col.is_none()), ctrl });
             }
         }
         if body_resp.double_clicked() {
             match col {
-                Some(c) if cfg.columns.get(c).is_some_and(|d| d.editor != Editor::None) && row < total_rows => {
+                Some(c)
+                    if cfg.columns.get(c).is_some_and(|d| d.editor != Editor::None)
+                        && row < total_rows
+                        && (row >= cfg.row_count || !cell(row, c).read_only) =>
+                {
                     let text = if row < cfg.row_count {
                         let ce = cell(row, c);
                         ce.edit_text.unwrap_or(ce.text)
@@ -453,15 +538,92 @@ pub fn show(
             }
         }
         if body_resp.secondary_clicked() && row < cfg.row_count {
-            if let Some(c) = col {
-                state.cursor = Some((row, c));
+            if let Some(c) = col
+                && !state.cell_bounds().is_some_and(|(r0, c0, r1, c1)| row >= r0 && row <= r1 && c >= c0 && c <= c1)
+            {
+                state.select_cell(row, c, false);
             }
             events.push(GridEvent::ContextMenu { row, pos: p });
         }
     }
 
+    // Retain pointer-event origins as well as egui's response state: a fast drag
+    // can begin and end between two frames without producing drag_started().
+    let (press_origin, drag_position, primary_down, primary_released) = ui.input(|i| {
+        let pressed = i.events.iter().find_map(|event| match event {
+            egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, .. } => Some(*pos),
+            _ => None,
+        });
+        let released = i.events.iter().rev().find_map(|event| match event {
+            egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, .. } => Some(*pos),
+            _ => None,
+        });
+        (i.pointer.press_origin().or(pressed), i.pointer.interact_pos().or(released), i.pointer.primary_down(), released.is_some())
+    });
+    if cfg.spreadsheet
+        && state.editing.is_none()
+        && state.drag_origin.is_none()
+        && (primary_down || primary_released)
+        && let (Some(origin), Some(position)) = (press_origin, drag_position)
+        && origin.distance(position) > 6.0
+        && ui.ctx().layer_id_at(origin) == Some(ui.layer_id())
+        && let Some((row, col)) = hit(origin, state.scroll_y)
+    {
+        state.drag_origin = Some(origin);
+        body_resp.request_focus();
+        if let Some(col) = col {
+            state.select_cell(row, col, false);
+        } else {
+            state.select_row(row, false);
+        }
+        events.push(GridEvent::Select { row, shift: false, ctrl: false });
+    }
+    if cfg.spreadsheet
+        && state.drag_origin.is_some()
+        && (primary_down || primary_released)
+        && let Some(pointer) = drag_position
+    {
+        let max_scroll = (content_h - body.height() + cfg.row_height).max(0.0);
+        let delta = if pointer.y < body.top() {
+            -cfg.row_height
+        } else if pointer.y > body.bottom() {
+            cfg.row_height
+        } else {
+            0.0
+        };
+        state.scroll_y = (state.scroll_y + delta).clamp(0.0, max_scroll);
+        if !state.rows_selected() {
+            let delta = if pointer.x < body.left() + rn_w {
+                -16.0
+            } else if pointer.x > body.right() {
+                16.0
+            } else {
+                0.0
+            };
+            state.scroll_x = (state.scroll_x + delta).clamp(0.0, (total_cols_w - cols_view_w).max(0.0));
+        }
+        let min_x = body.left() + rn_w + 0.5;
+        let min_y = body.top() + 0.5;
+        let p = pos2(pointer.x.clamp(min_x, (body.right() - 0.5).max(min_x)), pointer.y.clamp(min_y, (body.bottom() - 0.5).max(min_y)));
+        if let Some((row, col)) = hit(p, state.scroll_y) {
+            if state.rows_selected() {
+                let row = row.min(cfg.row_count.saturating_sub(1));
+                state.select_row(row, true);
+                events.push(GridEvent::Select { row, shift: true, ctrl: false });
+            } else if let Some(col) = col {
+                state.select_cell(row, col, true);
+                events.push(GridEvent::CursorRow { row, shift: false });
+            }
+        }
+        ui.ctx().request_repaint();
+    }
+    if !primary_down {
+        state.drag_origin = None;
+    }
+
     // ---- Editing ----
     let mut finished: Option<(bool, Option<(isize, isize)>)> = None; // (commit, move)
+    let mut enter_committed = false;
     if let Some((r, row, c)) = edit_rect
         && let Some(def) = cfg.columns.get(c)
         && let Some(edit) = state.editing.as_mut()
@@ -554,7 +716,9 @@ pub fn show(
                         if esc {
                             finished = Some((false, None));
                         } else if enter {
-                            finished = Some((true, Some((1, 0))));
+                            // Enter confirms the cell in place. Moving down is explicit via ↓.
+                            finished = Some((true, None));
+                            enter_committed = true;
                         } else if tab {
                             finished = Some((true, Some((0, if shift { -1 } else { 1 }))));
                         } else if up && resp.has_focus() {
@@ -583,7 +747,7 @@ pub fn show(
         if let Some((dr, dc)) = mv {
             let nr = (e.row as isize + dr).clamp(0, total_rows.saturating_sub(1) as isize) as usize;
             let nc = (e.col as isize + dc).clamp(0, ncols as isize - 1) as usize;
-            state.cursor = Some((nr, nc));
+            state.select_cell(nr, nc, false);
             state.scroll_to = Some(nr);
             if dr != 0 && nr < cfg.row_count {
                 events.push(GridEvent::CursorRow { row: nr, shift: false });
@@ -593,43 +757,60 @@ pub fn show(
     }
 
     // ---- Keyboard (grid focused, not editing) ----
-    if body_resp.has_focus() && state.editing.is_none() {
+    if body_resp.has_focus() && state.editing.is_none() && !enter_committed {
         ui.memory_mut(|m| {
             m.set_focus_lock_filter(body_resp.id, EventFilter { tab: true, horizontal_arrows: true, vertical_arrows: true, escape: false })
         });
         let (mut dr, mut dc) = (0isize, 0isize);
+        let mut navigation_shift = shift;
         let mut typed: Option<String> = None;
         let mut start_edit = false;
         let mut del = false;
         let mut ins = false;
+        let mut select_rows = false;
         ui.input(|i| {
             for ev in &i.events {
                 match ev {
-                    egui::Event::Key { key, pressed: true, modifiers, .. } if !modifiers.alt && !modifiers.command => match key {
-                        Key::ArrowUp => dr -= 1,
-                        Key::ArrowDown | Key::Enter => dr += 1,
-                        Key::ArrowLeft => dc -= 1,
-                        Key::ArrowRight | Key::Tab => dc += 1,
-                        Key::F2 => start_edit = true,
-                        Key::Delete => del = true,
-                        Key::Insert => ins = true,
-                        Key::PageDown => dr += (body.height() / cfg.row_height) as isize,
-                        Key::PageUp => dr -= (body.height() / cfg.row_height) as isize,
-                        _ => {}
-                    },
+                    egui::Event::Key { key, pressed: true, modifiers, .. } if !modifiers.alt && !modifiers.command => {
+                        navigation_shift = modifiers.shift;
+                        match key {
+                            Key::ArrowUp => dr -= 1,
+                            Key::ArrowDown | Key::Enter => dr += 1,
+                            Key::ArrowLeft => dc -= 1,
+                            Key::ArrowRight | Key::Tab => dc += 1,
+                            Key::F2 => start_edit = true,
+                            Key::Delete => del = true,
+                            Key::Insert => ins = true,
+                            Key::Space if modifiers.shift => select_rows = true,
+                            Key::PageDown => dr += (body.height() / cfg.row_height) as isize,
+                            Key::PageUp => dr -= (body.height() / cfg.row_height) as isize,
+                            _ => {}
+                        }
+                    }
                     egui::Event::Text(t) if !i.modifiers.command && !i.modifiers.alt => typed = Some(typed.take().unwrap_or_default() + t),
                     _ => {}
                 }
             }
         });
         let (row, col) = state.cursor.unwrap_or((0, 0));
+        if cfg.spreadsheet && select_rows {
+            state.select_row(row, false);
+            events.push(GridEvent::Select { row, shift: false, ctrl: false });
+        }
         if dr != 0 || dc != 0 {
             let nr = (row as isize + dr).clamp(0, total_rows.saturating_sub(1) as isize) as usize;
             let nc = (col as isize + dc).clamp(0, ncols as isize - 1) as usize;
-            state.cursor = Some((nr, nc));
+            let row_selection = cfg.spreadsheet && state.rows_selected() && dc == 0;
+            if row_selection {
+                state.select_row(nr, navigation_shift);
+            } else if cfg.spreadsheet {
+                state.select_cell(nr, nc, navigation_shift);
+            } else {
+                state.cursor = Some((nr, nc));
+            }
             state.scroll_to = Some(nr);
             if nr != row && nr < cfg.row_count {
-                events.push(GridEvent::CursorRow { row: nr, shift });
+                events.push(GridEvent::CursorRow { row: nr, shift: navigation_shift && (!cfg.spreadsheet || row_selection) });
             }
         }
         if del {
@@ -642,6 +823,7 @@ pub fn show(
             && r < total_rows
             && let Some(def) = cfg.columns.get(c)
             && def.editor != Editor::None
+            && (r >= cfg.row_count || !cell(r, c).read_only)
         {
             if let Some(t) = typed.filter(|t| !t.trim().is_empty()) {
                 if matches!(def.editor, Editor::Text | Editor::Date) {
@@ -665,6 +847,72 @@ pub fn show(
                 state.begin_edit(r, c, text);
             }
         }
+    }
+
+    // egui-winit replaces Ctrl+C/V with Copy/Paste and does not emit Key C/V.
+    // Leave these events to TextEdit while editing; otherwise operate on the cell.
+    if body_resp.has_focus() && state.editing.is_none() {
+        let clipboard_events = ui.input_mut(|i| {
+            let mut clipboard = Vec::new();
+            i.events.retain(|event| {
+                if matches!(event, egui::Event::Copy | egui::Event::Paste(_)) {
+                    clipboard.push(event.clone());
+                    false
+                } else {
+                    true
+                }
+            });
+            clipboard
+        });
+        if let Some((row, col)) = state.cursor
+            && row < total_rows
+        {
+            for event in clipboard_events {
+                match event {
+                    egui::Event::Copy => {
+                        let (r0, c0, r1, c1) = state.cell_bounds().unwrap_or((row, col, row, col));
+                        let rows: Vec<Vec<String>> = (r0..=r1.min(total_rows.saturating_sub(1)))
+                            .map(|r| {
+                                (c0..=c1.min(ncols.saturating_sub(1)))
+                                    .map(|c| {
+                                        if r < cfg.row_count {
+                                            let content = cell(r, c);
+                                            content.edit_text.unwrap_or(content.text)
+                                        } else {
+                                            String::new()
+                                        }
+                                    })
+                                    .collect()
+                            })
+                            .collect();
+                        ui.ctx().copy_text(crate::widgets::tsv::encode(&rows));
+                    }
+                    egui::Event::Paste(text) if cfg.spreadsheet => {
+                        let (row, col, _, _) = state.cell_bounds().unwrap_or((row, col, row, col));
+                        events.push(GridEvent::PasteCells { row, col, text });
+                    }
+                    egui::Event::Paste(text)
+                        if cfg.columns.get(col).is_some_and(|def| def.editor != Editor::None)
+                            && (row >= cfg.row_count || !cell(row, col).read_only) =>
+                    {
+                        events.push(GridEvent::Commit { row, col, text: text.trim().to_string() });
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    if cfg.spreadsheet
+        && let Some((r0, c0, r1, c1)) = state.cell_bounds()
+        && let (Some(&(x0, _)), Some(&(_, x1))) = (spans.get(c0), spans.get(c1))
+    {
+        let range = Rect::from_min_max(
+            pos2(x0, body.top() + r0 as f32 * cfg.row_height - state.scroll_y),
+            pos2(x1, body.top() + r1.saturating_add(1) as f32 * cfg.row_height - state.scroll_y),
+        );
+        let clip = Rect::from_min_max(pos2(body.left() + rn_w, body.top()), body.max);
+        ui.painter_at(clip).rect_stroke(range.shrink(0.5), 0.0, Stroke::new(2.0, theme::pal().ACCENT), StrokeKind::Inside);
     }
 
     // ---- Scrollbars ----

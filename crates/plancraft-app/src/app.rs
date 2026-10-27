@@ -21,6 +21,7 @@ use crate::start_page;
 use crate::state::{ToastKind, UiState, ViewKind};
 use crate::theme;
 use crate::views;
+use crate::views::print_gantt::PrintSettings;
 
 pub struct PlanCraftApp {
     ws: SharedWorkspace,
@@ -46,6 +47,7 @@ pub struct PlanCraftApp {
     crash: Option<String>,
     /// Developer/test hook: panic inside the next frame (`PLANCRAFT_CMD=Panic`).
     inject_panic: bool,
+    print_settings: PrintSettings,
 }
 
 /// Locks the shared workspace. A panic caught while it was held must not lock the user out of
@@ -64,6 +66,53 @@ fn has_selected_ancestor(p: &Project, i: usize, sel: &[TaskId]) -> bool {
         a = p.parent_index(ai);
     }
     false
+}
+
+/// Resolve selected task IDs again after a structural edit: their row indices can change.
+fn follow_task_row(ctx: &egui::Context, project: &Project, st: &mut UiState, target: TaskId) {
+    let old_row = st.task_grid.cursor.map_or(0, |(row, _)| row);
+    let col = st.task_grid.cursor.map_or(2, |(_, col)| col);
+    let locate = |rows: &[usize], id: TaskId| {
+        rows.iter()
+            .enumerate()
+            .filter_map(|(row, &index)| project.tasks.get(index).filter(|task| task.id == id).map(|_| row))
+            .min_by_key(|row| row.abs_diff(old_row))
+    };
+    let mut rows = views::visible_rows(project, st);
+    if locate(&rows, target).is_none() {
+        // An indent can place the target inside a previously collapsed summary.
+        let mut parent = project.task_index(target).and_then(|index| project.parent_index(index));
+        while let Some(index) = parent {
+            if let Some(task) = project.tasks.get(index) {
+                st.collapsed.remove(&task.id);
+            }
+            parent = project.parent_index(index);
+        }
+        rows = views::visible_rows(project, st);
+    }
+    let Some(row) = locate(&rows, target) else {
+        // A filter or collapsed group can still hide the target. Do not point at an unrelated row.
+        st.task_grid.cursor = None;
+        st.task_grid.selection = Some(crate::widgets::grid::GridSelection::Rows { anchor: 0, focus: 0 });
+        return;
+    };
+    let anchor = st.sel.anchor.and_then(|id| locate(&rows, id)).unwrap_or(row);
+    st.task_grid.cursor = Some((row, col));
+    st.task_grid.selection = Some(crate::widgets::grid::GridSelection::Rows { anchor, focus: row });
+    st.task_grid.scroll_to = Some(row);
+    if matches!(st.view, ViewKind::Gantt | ViewKind::TrackingGantt) {
+        ctx.memory_mut(|memory| memory.request_focus(egui::Id::new(("task_grid", st.table.label())).with("body")));
+    }
+}
+
+fn active_selected_task(project: &Project, st: &UiState) -> Option<TaskId> {
+    let rows = views::visible_rows(project, st);
+    st.task_grid
+        .cursor
+        .and_then(|(row, _)| views::task_at(project, &rows, row).map(|task| task.id))
+        .filter(|id| st.sel.tasks.contains(id))
+        .or(st.sel.anchor.filter(|id| st.sel.tasks.contains(id)))
+        .or_else(|| views::selected_in_order(project, &st.sel).first().copied())
 }
 
 /// Longest panic message shown to the user.
@@ -103,6 +152,7 @@ impl PlanCraftApp {
             recovery_error: None,
             crash: None,
             inject_panic: false,
+            print_settings: PrintSettings::default(),
         };
         if !app.recovery.found.is_empty() && !app.st.start_page {
             app.st.toast(
@@ -151,10 +201,38 @@ impl PlanCraftApp {
     fn shortcuts(&mut self, ctx: &egui::Context, out: &mut Vec<Command>) {
         // Only a focused text field should swallow shortcuts (the task grid holds focus too).
         let typing = ctx.text_edit_focused();
+        let grid_focused = ctx.memory(|m| m.has_focus(egui::Id::new(("task_grid", self.st.table.label())).with("body")));
+        if typing && ctx.input(|i| i.events.iter().any(|event| matches!(event, egui::Event::Copy))) {
+            self.st.task_clipboard_text = None;
+        }
+        if !typing {
+            let copy_rows = !grid_focused || self.st.task_grid.rows_selected();
+            if !copy_rows && ctx.input(|i| i.events.iter().any(|event| matches!(event, egui::Event::Copy))) {
+                self.st.task_clipboard_text = None;
+            }
+            ctx.input_mut(|i| {
+                i.events.retain(|event| {
+                    let command = match event {
+                        egui::Event::Copy if copy_rows => Some(Command::Copy),
+                        egui::Event::Cut => Some(Command::Cut),
+                        egui::Event::Paste(text) if self.st.task_clipboard_text.as_ref() == Some(text) => Some(Command::Paste),
+                        egui::Event::Paste(_) if !grid_focused => Some(Command::Paste),
+                        _ => None,
+                    };
+                    if let Some(command) = command {
+                        out.push(command);
+                        false
+                    } else {
+                        true
+                    }
+                });
+            });
+        }
         let cmd = Modifiers::COMMAND;
         let map: Vec<(KeyboardShortcut, Command, bool)> = vec![
             (KeyboardShortcut::new(cmd, Key::N), Command::NewProject, true),
             (KeyboardShortcut::new(cmd, Key::O), Command::Open, true),
+            (KeyboardShortcut::new(cmd, Key::P), Command::PrintGantt, true),
             (KeyboardShortcut::new(cmd | Modifiers::SHIFT, Key::S), Command::SaveAs, true),
             (KeyboardShortcut::new(cmd, Key::S), Command::Save, true),
             (KeyboardShortcut::new(cmd | Modifiers::SHIFT, Key::Z), Command::Redo, false),
@@ -175,7 +253,8 @@ impl PlanCraftApp {
             (KeyboardShortcut::new(cmd, Key::V), Command::Paste, false),
         ];
         for (sc, c, global) in map {
-            if (global || !typing) && ctx.input_mut(|i| i.consume_shortcut(&sc)) {
+            let grid_cell_clipboard = grid_focused && matches!(c, Command::Copy | Command::Paste);
+            if !grid_cell_clipboard && (global || !typing) && ctx.input_mut(|i| i.consume_shortcut(&sc)) {
                 out.push(c);
             }
         }
@@ -376,6 +455,10 @@ impl PlanCraftApp {
                 self.set_status(crate::tr("Recovery copy discarded"));
             }
             Command::ExportCsv => self.export_csv(),
+            Command::PrintGantt => {
+                self.st.print_preview = true;
+                self.st.start_page = false;
+            }
             Command::Templates => self.dialogs.templates = true,
             Command::NewFromTemplate(t) => {
                 let start = chrono::Local::now().date_naive();
@@ -511,13 +594,22 @@ impl PlanCraftApp {
         }
         match cmd {
             Command::Undo => {
+                let target = st.task_grid.rows_selected().then(|| active_selected_task(&doc.project, st)).flatten();
                 if doc.undo() {
+                    if let Some(id) = target.filter(|id| doc.project.task(*id).is_some()) {
+                        follow_task_row(ctx, &doc.project, st, id);
+                    }
                     let l = doc.last_change.as_ref().map(|l| l.0.clone()).unwrap_or_default();
                     self.status = Some((l, Instant::now()));
                 }
             }
             Command::Redo => {
-                doc.redo();
+                let target = st.task_grid.rows_selected().then(|| active_selected_task(&doc.project, st)).flatten();
+                if doc.redo()
+                    && let Some(id) = target.filter(|id| doc.project.task(*id).is_some())
+                {
+                    follow_task_row(ctx, &doc.project, st, id);
+                }
             }
             Command::InsertTask | Command::InsertMilestone => {
                 let milestone = cmd == Command::InsertMilestone;
@@ -571,19 +663,31 @@ impl PlanCraftApp {
             }
             Command::Indent | Command::Outdent => {
                 let indent = cmd == Command::Indent;
+                let target = active_selected_task(&doc.project, st);
                 // Only move top-most selected blocks (children follow their parent).
                 let tops: Vec<TaskId> = sel
                     .iter()
                     .copied()
                     .filter(|id| doc.project.task_index(*id).is_some_and(|i| !has_selected_ancestor(&doc.project, i, &sel)))
                     .collect();
-                let r = doc.try_edit(if indent { crate::tr("Indent") } else { crate::tr("Outdent") }, ChangeSource::User, |p| {
-                    for id in &tops {
-                        if indent { p.indent(*id)? } else { p.outdent(*id)? }
+                if tops.is_empty() {
+                    return;
+                }
+                let r: PlanResult<()> =
+                    doc.try_edit(if indent { crate::tr("Indent") } else { crate::tr("Outdent") }, ChangeSource::User, |p| {
+                        for id in &tops {
+                            if indent { p.indent(*id)? } else { p.outdent(*id)? }
+                        }
+                        Ok(())
+                    });
+                match r {
+                    Ok(()) => {
+                        if let Some(id) = target {
+                            follow_task_row(ctx, &doc.project, st, id);
+                        }
                     }
-                    Ok(())
-                });
-                report(st, r);
+                    Err(e) => st.toast(ToastKind::Warning, e.to_string()),
+                }
             }
             Command::MoveUp | Command::MoveDown => {
                 if let Some(id) = sel.first().copied() {
@@ -591,7 +695,10 @@ impl PlanCraftApp {
                     let r = doc.try_edit(if up { crate::tr("Move Up") } else { crate::tr("Move Down") }, ChangeSource::User, |p| {
                         p.shift_task(id, up)
                     });
-                    report(st, r);
+                    match r {
+                        Ok(()) => follow_task_row(ctx, &doc.project, st, id),
+                        Err(e) => st.toast(ToastKind::Warning, e.to_string()),
+                    }
                 }
             }
             Command::LinkSelected => {
@@ -722,6 +829,9 @@ impl PlanCraftApp {
                         }
                     }
                     st.clipboard = copied;
+                    let text = st.clipboard.iter().map(|task| task.name.as_str()).collect::<Vec<_>>().join("\n");
+                    ctx.copy_text(text.clone());
+                    st.task_clipboard_text = Some(text);
                     if cmd == Command::Cut {
                         let r = doc.try_edit(crate::tr("Cut Tasks"), ChangeSource::User, |p| p.delete_tasks(&sel).map(|_| ()));
                         report(st, r);
@@ -752,7 +862,30 @@ impl PlanCraftApp {
                         ids
                     });
                     match r {
-                        Ok(ids) => st.sel.tasks = ids.into_iter().collect(),
+                        Ok(ids) => {
+                            let first = ids.first().copied();
+                            st.sel.tasks = ids.into_iter().collect();
+                            st.sel.anchor = first;
+                            if let Some(first) = first {
+                                let rows = views::visible_rows(&doc.project, st);
+                                if let Some(row) =
+                                    rows.iter().position(|&index| doc.project.tasks.get(index).is_some_and(|task| task.id == first))
+                                {
+                                    let col = st.task_grid.cursor.map_or(2, |(_, col)| col);
+                                    let last = rows
+                                        .iter()
+                                        .enumerate()
+                                        .filter_map(|(row, &index)| {
+                                            doc.project.tasks.get(index).filter(|task| st.sel.tasks.contains(&task.id)).map(|_| row)
+                                        })
+                                        .max()
+                                        .unwrap_or(row);
+                                    st.task_grid.selection = Some(crate::widgets::grid::GridSelection::Rows { anchor: row, focus: last });
+                                    st.task_grid.cursor = Some((row, col));
+                                    st.task_grid.scroll_to = Some(row);
+                                }
+                            }
+                        }
                         Err(e) => st.toast(ToastKind::Warning, e.to_string()),
                     }
                 }
@@ -1232,6 +1365,11 @@ impl PlanCraftApp {
                         self.st.gantt.show_critical = true;
                         continue;
                     }
+                    "PrintGantt" => {
+                        self.st.print_preview = true;
+                        self.st.start_page = false;
+                        continue;
+                    }
                     "FileMenu" => {
                         egui::Popup::open_id(ctx, egui::Id::new("tab_file").with("popup"));
                         continue;
@@ -1460,7 +1598,20 @@ impl PlanCraftApp {
         let info = self.menu_info(&ws);
         let start_open = self.st.start_page;
 
-        if start_open {
+        if self.st.print_preview {
+            let mut close_preview = false;
+            if let Some(doc) = ws.active_doc() {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    close_preview =
+                        views::print_gantt::show(ui, &doc.project, &self.st, &mut self.print_settings, &self.settings.font_family);
+                });
+                if close_preview {
+                    self.st.print_preview = false;
+                }
+            } else {
+                self.st.print_preview = false;
+            }
+        } else if start_open {
             let stats = ws.active_doc().map(|d| plancraft_core::report::project_stats(&d.project));
             let sinfo = start_page::StartInfo {
                 has_doc: info.has_doc,
@@ -1664,6 +1815,7 @@ impl eframe::App for PlanCraftApp {
 #[cfg(test)]
 mod ui_tests {
     use super::*;
+    use chrono::Datelike;
     use egui_kittest::Harness;
 
     fn harness() -> Harness<'static, PlanCraftApp> {
@@ -1684,6 +1836,280 @@ mod ui_tests {
     fn tasks(h: &Harness<'static, PlanCraftApp>) -> Vec<String> {
         let ws = h.state().ws.lock().unwrap();
         ws.active_doc().unwrap().project.tasks.iter().map(|t| t.name.clone()).collect()
+    }
+
+    fn grid_point(h: &Harness<'static, PlanCraftApp>, row: usize, col: Option<usize>) -> egui::Pos2 {
+        let id = egui::Id::new(("task_grid", h.state().st.table.label())).with("body");
+        let body = h.ctx.read_response(id).unwrap().rect;
+        let grid = &h.state().st.task_grid;
+        let x = col.map_or(body.left() + 17.0, |col| {
+            body.left() + 34.0 + grid.widths.iter().take(col).sum::<f32>() + grid.widths[col] * 0.5 - grid.scroll_x
+        });
+        pos2(x, body.top() + (row as f32 + 0.5) * theme::ROW_HEIGHT - grid.scroll_y)
+    }
+
+    fn grid_drag(h: &mut Harness<'static, PlanCraftApp>, from: egui::Pos2, to: egui::Pos2) {
+        h.hover_at(from);
+        h.run_steps(1);
+        h.drag_at(from);
+        h.run_steps(1);
+        h.hover_at(to);
+        h.run_steps(2);
+        h.drop_at(to);
+        h.run_steps(2);
+    }
+
+    #[test]
+    fn shift_click_extends_cells_after_shift_is_released_before_the_frame() {
+        let mut h = harness();
+        h.state_mut().st.task_grid.select_cell(1, 2, false);
+        focus_task_grid(&mut h);
+        let end = grid_point(&h, 2, Some(3));
+        h.input_mut().events.extend([
+            egui::Event::PointerMoved(end),
+            egui::Event::PointerButton { pos: end, button: egui::PointerButton::Primary, pressed: true, modifiers: Modifiers::SHIFT },
+            egui::Event::PointerButton { pos: end, button: egui::PointerButton::Primary, pressed: false, modifiers: Modifiers::SHIFT },
+            egui::Event::ModifiersChanged(Modifiers::NONE),
+        ]);
+        h.run_steps(3);
+        assert_eq!(h.state().st.task_grid.cell_bounds(), Some((1, 2, 2, 3)));
+        assert!(!h.state().st.task_grid.rows_selected());
+    }
+
+    #[test]
+    fn fast_first_drag_selects_rows_even_when_press_and_release_share_a_frame() {
+        let mut h = harness();
+        let from = grid_point(&h, 1, None);
+        let to = grid_point(&h, 2, None);
+        h.input_mut().events.extend([
+            egui::Event::PointerMoved(from),
+            egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE },
+            egui::Event::PointerMoved(to),
+            egui::Event::PointerButton { pos: to, button: egui::PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE },
+        ]);
+        h.run_steps(3);
+        assert!(h.state().st.task_grid.rows_selected());
+        assert_eq!(h.state().st.sel.tasks.len(), 2);
+    }
+
+    #[test]
+    fn id_drag_inserts_tasks_but_cell_rectangle_overwrites_only_selected_cells() {
+        let mut h = harness();
+        let before = tasks(&h);
+        let from = grid_point(&h, 1, None);
+        let to = grid_point(&h, 2, None);
+        grid_drag(&mut h, from, to);
+        assert!(h.state().st.task_grid.rows_selected());
+        assert_eq!(h.state().st.sel.tasks.len(), 2);
+        h.event(egui::Event::Copy);
+        h.run_steps(3);
+        let copied_rows = h.state().st.task_clipboard_text.clone().unwrap();
+        h.state_mut().st.task_grid.select_row(5, false);
+        let id = h.state().ws.lock().unwrap().active_doc().unwrap().project.tasks[5].id;
+        h.state_mut().st.sel.select_task(id);
+        h.event(egui::Event::Paste(copied_rows));
+        h.run_steps(3);
+        assert_eq!(tasks(&h).len(), before.len() + 2);
+        h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+        h.run_steps(3);
+        assert_eq!(tasks(&h), before);
+
+        let from = grid_point(&h, 2, Some(3));
+        let to = grid_point(&h, 1, Some(2));
+        grid_drag(&mut h, from, to);
+        assert!(!h.state().st.task_grid.rows_selected());
+        assert_eq!(h.state().st.task_grid.cell_bounds(), Some((1, 2, 2, 3)));
+        h.event(egui::Event::Copy);
+        h.run_steps(1);
+        let copied_cells = h
+            .output()
+            .platform_output
+            .commands
+            .iter()
+            .find_map(|command| match command {
+                egui::OutputCommand::CopyText(text) => Some(text.clone()),
+                _ => None,
+            })
+            .unwrap();
+        let matrix = crate::widgets::tsv::decode(&copied_cells).unwrap();
+        assert_eq!(matrix.len(), 2);
+        assert_eq!(matrix[0].len(), 2);
+        assert_eq!(matrix[0][0], before[1]);
+        assert_eq!(matrix[1][0], before[2]);
+        assert!(h.state().st.task_clipboard_text.is_none());
+        h.state_mut().st.task_grid.select_cell(5, 2, false);
+        h.event(egui::Event::Paste(copied_cells));
+        h.run_steps(3);
+        assert_eq!(tasks(&h).len(), before.len());
+        assert_eq!(tasks(&h)[5], before[1]);
+        assert_eq!(tasks(&h)[6], before[2]);
+        assert_eq!(tasks(&h)[7], before[7]);
+        h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+        h.run_steps(3);
+        assert_eq!(tasks(&h), before, "one Undo restores all overwritten cells");
+    }
+
+    #[test]
+    fn bulk_tsv_protects_auto_dates_keeps_column_positions_and_rolls_back_bad_values() {
+        let mut h = harness();
+        h.state_mut().st.task_grid.select_cell(1, 0, false);
+        focus_task_grid(&mut h);
+        let original_constraint = h.state().ws.lock().unwrap().active_doc().unwrap().project.tasks[1].constraint;
+        h.event(egui::Event::Paste("ignored\tAuto Scheduled\tBulk task\t2d\t2099-01-01\t2099-01-02\t".into()));
+        h.run_steps(3);
+        {
+            let ws = h.state().ws.lock().unwrap();
+            let task = &ws.active_doc().unwrap().project.tasks[1];
+            assert_eq!(task.name, "Bulk task");
+            assert_eq!(task.duration, 2 * 480);
+            assert_eq!(task.constraint, original_constraint);
+            assert!(task.manual_start.is_none());
+            assert!(task.sched.start.unwrap().date().year() < 2099);
+        }
+        let before_bad = serde_json::to_string(&h.state().ws.lock().unwrap().active_doc().unwrap().project).unwrap();
+        h.state_mut().st.task_grid.select_cell(1, 2, false);
+        h.event(egui::Event::Paste("Must roll back\tnot-a-duration\r\nSecond row\t3d".into()));
+        h.run_steps(3);
+        assert_eq!(serde_json::to_string(&h.state().ws.lock().unwrap().active_doc().unwrap().project).unwrap(), before_bad);
+        h.state_mut().st.task_grid.select_cell(1, 4, false);
+        h.key_press(Key::F2);
+        h.run_steps(3);
+        assert!(h.state().st.task_grid.editing.is_none(), "auto dates cannot enter the editor");
+    }
+
+    #[test]
+    fn shift_selected_rows_native_copy_paste_preserves_tasks_and_undoes_together() {
+        let mut h = harness();
+        let before = tasks(&h);
+        let original = {
+            let ws = h.state().ws.lock().unwrap();
+            ws.active_doc().unwrap().project.tasks.clone()
+        };
+        h.state_mut().st.sel.select_task(original[1].id);
+        h.state_mut().st.task_grid.select_row(1, false);
+        focus_task_grid(&mut h);
+        // Windows can deliver Shift release before the next frame. The key event
+        // still records that Shift was held when the arrow was pressed.
+        for pressed in [true, false] {
+            h.input_mut().events.push(egui::Event::Key {
+                key: Key::ArrowDown,
+                physical_key: None,
+                pressed,
+                repeat: false,
+                modifiers: Modifiers::SHIFT,
+            });
+        }
+        h.input_mut().events.push(egui::Event::ModifiersChanged(Modifiers::NONE));
+        h.run_steps(3);
+        assert_eq!(h.state().st.sel.tasks.len(), 2);
+        h.event(egui::Event::Copy);
+        h.run_steps(3);
+        assert_eq!(h.state().st.clipboard.len(), 2);
+        let copied = h.state().st.task_clipboard_text.clone().unwrap();
+        assert_eq!(copied, format!("{}\n{}", before[1], before[2]));
+
+        // Paste before another task after clearing the original selection.
+        h.state_mut().st.sel.select_task(original[5].id);
+        h.state_mut().st.task_grid.cursor = Some((5, 2));
+        h.event(egui::Event::Paste(copied.clone()));
+        h.run_steps(3);
+        assert_eq!(tasks(&h).len(), before.len() + 2);
+        {
+            let ws = h.state().ws.lock().unwrap();
+            let project = &ws.active_doc().unwrap().project;
+            for (source, pasted) in original.iter().skip(1).take(2).zip(project.tasks.iter().skip(5).take(2)) {
+                assert_ne!(source.id, pasted.id);
+                assert_eq!(source.name, pasted.name);
+                assert_eq!(source.duration, pasted.duration);
+                assert_eq!(source.notes, pasted.notes);
+            }
+        }
+        assert_eq!(h.state().st.sel.tasks.len(), 2);
+        assert_eq!(h.state().st.task_grid.cursor, Some((5, 2)));
+        h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+        h.run_steps(3);
+        assert_eq!(tasks(&h), before, "one Undo removes the entire pasted block");
+
+        // Pasting at a blank row appends the whole block too.
+        h.state_mut().st.sel.tasks.clear();
+        h.state_mut().st.task_grid.cursor = Some((before.len(), 2));
+        h.event(egui::Event::Paste(copied));
+        h.run_steps(3);
+        assert_eq!(tasks(&h).len(), before.len() + 2);
+        assert_eq!(tasks(&h)[before.len()], before[1]);
+        assert_eq!(tasks(&h)[before.len() + 1], before[2]);
+
+        // A subsequent single-cell copy must replace the row clipboard mode.
+        h.state_mut().st.sel.select_task(original[1].id);
+        h.state_mut().st.task_grid.select_cell(1, 2, false);
+        h.event(egui::Event::Copy);
+        h.run_steps(3);
+        assert!(h.state().st.task_clipboard_text.is_none());
+        h.state_mut().st.task_grid.select_cell(2, 2, false);
+        h.event(egui::Event::Paste(before[1].clone()));
+        h.run_steps(3);
+        assert_eq!(tasks(&h).len(), before.len() + 2);
+        assert_eq!(tasks(&h)[2], before[1]);
+    }
+
+    #[test]
+    fn native_clipboard_events_copy_and_paste_cells_and_support_undo() {
+        let mut h = harness();
+        let before = tasks(&h);
+        h.state_mut().st.task_grid.cursor = Some((1, 2));
+        focus_task_grid(&mut h);
+        // Windows emits Copy, without a Key C event or any required modifier state.
+        h.event(egui::Event::Copy);
+        h.run_steps(1);
+        let copied = h
+            .output()
+            .platform_output
+            .commands
+            .iter()
+            .find_map(|command| match command {
+                egui::OutputCommand::CopyText(text) => Some(text.clone()),
+                _ => None,
+            })
+            .expect("the cell value reaches the system clipboard");
+        assert_eq!(copied, before[1]);
+
+        h.state_mut().st.task_grid.cursor = Some((2, 2));
+        h.event(egui::Event::Paste(copied.clone()));
+        h.run_steps(3);
+        assert_eq!(tasks(&h)[2], copied);
+        assert_eq!(tasks(&h).len(), before.len(), "cell paste must not insert a task row");
+        assert_eq!(h.state().st.task_grid.cursor, Some((2, 2)));
+        assert!(h.state().st.task_grid.editing.is_none(), "paste commits immediately");
+        h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+        h.run_steps(3);
+        assert_eq!(tasks(&h), before);
+
+        // External cell text overwrites an existing task; blank rows never insert tasks.
+        h.state_mut().st.task_grid.select_cell(1, 2, false);
+        h.event(egui::Event::Paste("External clipboard task".into()));
+        h.run_steps(3);
+        assert_eq!(tasks(&h)[1], "External clipboard task");
+        h.state_mut().st.task_grid.select_cell(before.len(), 2, false);
+        h.event(egui::Event::Paste("Must not create a task".into()));
+        h.run_steps(3);
+        assert_eq!(tasks(&h).len(), before.len());
+    }
+
+    #[test]
+    fn native_clipboard_paste_respects_text_editor_and_enter_keeps_cursor() {
+        let mut h = harness();
+        h.state_mut().st.task_grid.cursor = Some((1, 2));
+        focus_task_grid(&mut h);
+        h.event(egui::Event::Text("Edited ".into()));
+        h.run_steps(3);
+        h.event(egui::Event::Paste("cell".into()));
+        h.run_steps(3);
+        assert_eq!(h.state().st.task_grid.editing.as_ref().unwrap().text, "Edited cell");
+        h.key_press(Key::Enter);
+        h.run_steps(3);
+        assert_eq!(tasks(&h)[1], "Edited cell");
+        assert_eq!(h.state().st.task_grid.cursor, Some((1, 2)));
+        assert!(h.state().st.task_grid.editing.is_none());
     }
 
     #[test]
@@ -1723,6 +2149,82 @@ mod ui_tests {
         let names = tasks(&h);
         assert_eq!(names.len(), n + 1);
         assert_eq!(names[2], "Inserted step", "{names:?}");
+    }
+
+    #[test]
+    fn task_shortcuts_switch_cell_selection_to_following_row_through_moves_and_outline() {
+        let mut h = harness();
+        let (target, above, level) = {
+            let ws = h.state().ws.lock().unwrap();
+            let project = &ws.active_doc().unwrap().project;
+            (project.tasks[2].id, project.tasks[1].id, project.tasks[2].outline_level)
+        };
+        h.state_mut().st.sel.select_task(target);
+        h.state_mut().st.task_grid.select_cell(2, 2, false);
+        focus_task_grid(&mut h);
+
+        for (key, expected_row) in [(Key::ArrowUp, 1), (Key::ArrowDown, 2)] {
+            h.key_press_modifiers(Modifiers::ALT | Modifiers::SHIFT, key);
+            h.run_steps(3);
+            let st = &h.state().st;
+            assert!(st.task_grid.rows_selected());
+            assert_eq!(st.sel.single_task(), Some(target));
+            assert_eq!(st.task_grid.cursor, Some((expected_row, 2)));
+            assert_eq!(h.state().ws.lock().unwrap().active_doc().unwrap().project.task_index(target), Some(expected_row));
+        }
+        // Undo and Redo also move the row cursor with the same task ID.
+        h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+        h.run_steps(3);
+        assert_eq!(h.state().st.task_grid.cursor, Some((1, 2)));
+        h.key_press_modifiers(Modifiers::COMMAND, Key::Y);
+        h.run_steps(3);
+        assert_eq!(h.state().st.task_grid.cursor, Some((2, 2)));
+
+        // Indenting under a collapsed task must reveal and retain the target row.
+        h.state_mut().st.collapsed.insert(above);
+        h.state_mut().st.task_grid.select_cell(2, 2, false);
+        h.key_press_modifiers(Modifiers::ALT | Modifiers::SHIFT, Key::ArrowRight);
+        h.run_steps(3);
+        assert!(h.state().st.task_grid.rows_selected());
+        assert!(!h.state().st.collapsed.contains(&above));
+        assert_eq!(h.state().st.task_grid.cursor, Some((2, 2)));
+        assert_eq!(h.state().ws.lock().unwrap().active_doc().unwrap().project.task(target).unwrap().outline_level, level + 1);
+
+        h.state_mut().st.task_grid.select_cell(2, 2, false);
+        h.key_press_modifiers(Modifiers::ALT | Modifiers::SHIFT, Key::ArrowLeft);
+        h.run_steps(3);
+        assert!(h.state().st.task_grid.rows_selected());
+        assert_eq!(h.state().st.sel.single_task(), Some(target));
+        assert_eq!(h.state().st.task_grid.cursor, Some((2, 2)));
+        assert_eq!(h.state().ws.lock().unwrap().active_doc().unwrap().project.task(target).unwrap().outline_level, level);
+    }
+
+    #[test]
+    fn unsuccessful_move_keeps_cell_selection_and_multi_selection_keeps_task_ids() {
+        let mut h = harness();
+        let ids = {
+            let ws = h.state().ws.lock().unwrap();
+            let project = &ws.active_doc().unwrap().project;
+            [project.tasks[0].id, project.tasks[1].id, project.tasks[2].id]
+        };
+        h.state_mut().st.sel.select_task(ids[0]);
+        h.state_mut().st.task_grid.select_cell(0, 2, false);
+        focus_task_grid(&mut h);
+        h.key_press_modifiers(Modifiers::ALT | Modifiers::SHIFT, Key::ArrowRight);
+        h.run_steps(3);
+        assert_eq!(h.state().st.task_grid.cell_bounds(), Some((0, 2, 0, 2)));
+        assert_eq!(h.state().st.sel.single_task(), Some(ids[0]));
+
+        h.state_mut().st.sel.tasks = [ids[1], ids[2]].into_iter().collect();
+        h.state_mut().st.sel.anchor = Some(ids[1]);
+        h.state_mut().st.task_grid.select_row(1, false);
+        h.state_mut().st.task_grid.select_row(2, true);
+        h.key_press_modifiers(Modifiers::ALT | Modifiers::SHIFT, Key::ArrowDown);
+        h.run_steps(3);
+        assert_eq!(h.state().st.sel.tasks, [ids[1], ids[2]].into_iter().collect());
+        assert!(h.state().st.task_grid.rows_selected());
+        assert_eq!(h.state().st.task_grid.cursor, Some((2, 2)), "the task actually moved is followed");
+        assert_eq!(h.state().ws.lock().unwrap().active_doc().unwrap().project.task_index(ids[1]), Some(2));
     }
 
     #[test]
