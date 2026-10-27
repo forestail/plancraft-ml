@@ -1,6 +1,11 @@
 //! Japanese interface strings.
 
 const DYNAMIC: &[(&str, &str)] = &[
+    (
+        "Pasted {} cells; skipped {} protected or out-of-range cells",
+        "{} セルを貼り付けました。編集不可・範囲外の {} セルをスキップしました",
+    ),
+    ("Row {}, column {}: {}", "行 {}、列 {}: {}"),
     ("Undo {} (Ctrl+Z)", "元に戻す {} (Ctrl+Z)"),
     ("{} - PlanCraft", "{} - PlanCraft"),
     ("Do you want to save changes to {}?", "「{}」への変更を保存しますか？"),
@@ -90,6 +95,8 @@ pub fn translate_dynamic(s: &str) -> Option<String> {
 
 pub fn translate(s: &str) -> Option<&'static str> {
     Some(match s {
+        "Print Gantt…" => "ガントチャートを印刷…",
+        "Preview and print the Gantt chart" => "ガントチャートの印刷プレビューと印刷",
         "Gantt Chart" => "ガント チャート",
         "Tracking Gantt" => "進捗管理ガント",
         "Task Usage" => "タスク配分状況",
@@ -855,6 +862,9 @@ pub fn translate(s: &str) -> Option<&'static str> {
         "No project open" => "プロジェクトが開かれていません",
         "Open the sample project" => "サンプル プロジェクトを開く",
         "Paste Tasks" => "タスクの貼り付け",
+        "Paste Cells" => "セル範囲の貼り付け",
+        "Clipboard data is too large" => "クリップボードのデータが大きすぎます",
+        "Clipboard text has an unclosed quoted cell" => "貼り付けテキストのセルを囲む引用符が閉じられていません",
         "PlanCraft found unsaved work from an earlier session. Open the Start Page (File menu) to restore it." => {
             "前回のセッションで保存されなかった作業が見つかりました。ファイル メニューからスタート ページを開いて復元してください。"
         }

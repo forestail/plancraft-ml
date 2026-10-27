@@ -2,8 +2,10 @@
 
 pub mod calendar;
 pub mod gantt;
+mod gantt_cells;
 pub mod gantt_chart;
 pub mod milestones;
+pub mod print_gantt;
 pub mod resource_sheet;
 pub mod resource_usage;
 pub mod task_usage;

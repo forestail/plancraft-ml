@@ -401,7 +401,9 @@ pub fn cell(col: TaskCol, p: &Project, idx: usize, ctx: &CellCtx) -> Cell {
         Milestones => {
             Cell::weak(p.milestones_of(t.id).iter().filter_map(|m| p.task(*m)).map(|m| m.name.clone()).collect::<Vec<_>>().join(", "))
         }
-        Notes => Cell::text(t.notes.lines().next().unwrap_or_default().to_string()),
+        Notes => {
+            Cell { text: t.notes.lines().next().unwrap_or_default().to_string(), edit_text: Some(t.notes.clone()), ..Default::default() }
+        }
         UniqueId => Cell::weak(t.id.0.to_string()),
         FixedCostAccrual => Cell::text(t.fixed_cost_accrual.label()),
         ActualCost | RemainingCost => {
@@ -441,7 +443,25 @@ pub fn cell(col: TaskCol, p: &Project, idx: usize, ctx: &CellCtx) -> Cell {
     if col == Name && t.sched.critical && t.mode == ScheduleMode::Auto && !summary {
         // Critical tasks are shown in the chart; keep table readable.
     }
+    c.read_only = !can_edit_at(col, p, idx);
     c
+}
+
+/// Task-specific editability used by both inline editing and bulk paste.
+pub fn can_edit(col: TaskCol, p: &Project, id: TaskId) -> bool {
+    p.task_index(id).is_some_and(|index| can_edit_at(col, p, index))
+}
+
+fn can_edit_at(col: TaskCol, p: &Project, index: usize) -> bool {
+    if col.def(p).editor == crate::widgets::grid::Editor::None {
+        return false;
+    }
+    let Some(task) = p.tasks.get(index) else { return false };
+    match col {
+        TaskCol::Start | TaskCol::Finish => task.mode == ScheduleMode::Manual && !p.has_children(index),
+        TaskCol::Duration | TaskCol::Work => !p.has_children(index),
+        _ => true,
+    }
 }
 
 fn parse_date(p: &Project, text: &str, finish: bool) -> Result<Option<NaiveDateTime>, String> {
@@ -467,7 +487,7 @@ pub fn commit(col: TaskCol, p: &mut Project, id: TaskId, text: &str) -> Result<(
     let summary = p.has_children(idx);
     let err = |e: PlanError| e.to_string();
     // Choice lists show translated labels; match on the English originals.
-    let text = crate::untr(text);
+    let text = if matches!(col, Mode | ConstraintType | TaskType | EstimateMethod | FixedCostAccrual) { crate::untr(text) } else { text };
     match col {
         Name => {
             if text.trim().is_empty() {

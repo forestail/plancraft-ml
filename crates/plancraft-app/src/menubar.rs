@@ -542,6 +542,7 @@ fn ribbon(ui: &mut Ui, st: &mut UiState, info: &MenuInfo, settings: &AppSettings
                 });
             });
             group(ui, crate::tr("Export"), |ui| {
+                bg(ui, "PRN", crate::tr("Print Gantt…"), crate::tr("Preview and print the Gantt chart"), doc, Command::PrintGantt);
                 bg(ui, "🗐", crate::tr("Export CSV"), crate::tr("Export the task list as CSV"), doc, Command::ExportCsv);
                 bg(ui, "📤", crate::tr("Export to MS Project XML…"), "", doc, Command::ExportXml);
             });

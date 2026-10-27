@@ -122,6 +122,7 @@ pub fn show(ui: &mut Ui, rect: Rect, doc: &mut Document, st: &mut UiState) {
         header_height: 30.0,
         row_height: theme::ROW_HEIGHT,
         row_label: None,
+        spreadsheet: false,
     };
     let output = {
         let lines = &lines;
