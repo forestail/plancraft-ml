@@ -156,7 +156,7 @@ impl WorkingTime {
         if self.week_loaded_for != Some(cal.id) {
             self.load_week(&cal);
         }
-        egui::Window::new(crate::tr("Change Working Time"))
+        super::window(ctx, crate::tr("Change Working Time"))
             .id(egui::Id::new("working_time"))
             .pivot(egui::Align2::CENTER_TOP)
             .default_pos(ctx.content_rect().center_top() + egui::vec2(0.0, 120.0))
@@ -204,7 +204,7 @@ impl WorkingTime {
                         ui.set_width(230.0);
                         self.month_view(ui, &cal);
                     });
-                    ui.separator();
+                    ui.add_space(12.0);
                     ui.vertical(|ui| {
                         ui.horizontal(|ui| {
                             ui.selectable_value(&mut self.tab, 0, crate::tr("Exceptions"));
@@ -355,18 +355,22 @@ impl WorkingTime {
                     ui.colored_label(theme::pal().ERROR, e);
                 }
                 ui.separator();
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button(crate::tr("Close")).clicked() {
-                        close = true;
-                    }
-                    if cal.id != doc.project.calendar && ui.button(crate::tr("Delete Calendar")).clicked() {
-                        let id = cal.id;
-                        if let Err(e) = doc.try_edit(crate::tr("Delete Calendar"), ChangeSource::User, |p| p.delete_calendar(id)) {
-                            self.error = Some(e.to_string());
+                ui.allocate_ui_with_layout(
+                    egui::vec2(ui.available_width(), 34.0),
+                    egui::Layout::right_to_left(egui::Align::Center),
+                    |ui| {
+                        if ui.button(crate::tr("Close")).clicked() {
+                            close = true;
                         }
-                        self.calendar = doc.project.calendar;
-                    }
-                });
+                        if cal.id != doc.project.calendar && ui.button(crate::tr("Delete Calendar")).clicked() {
+                            let id = cal.id;
+                            if let Err(e) = doc.try_edit(crate::tr("Delete Calendar"), ChangeSource::User, |p| p.delete_calendar(id)) {
+                                self.error = Some(e.to_string());
+                            }
+                            self.calendar = doc.project.calendar;
+                        }
+                    },
+                );
             });
         open && !close
     }

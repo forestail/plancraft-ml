@@ -115,6 +115,7 @@ fn main() -> anyhow::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("PlanCraft")
+            .with_decorations(!cfg!(target_os = "windows"))
             .with_app_id("plancraft")
             .with_inner_size([1440.0, 900.0])
             .with_min_inner_size([900.0, 560.0])

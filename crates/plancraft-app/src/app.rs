@@ -23,6 +23,40 @@ use crate::theme;
 use crate::views;
 use crate::views::print_gantt::PrintSettings;
 
+#[cfg(target_os = "windows")]
+fn resize_window_edges(ctx: &egui::Context) {
+    use egui::{CursorIcon, ResizeDirection as D, ViewportCommand};
+    let edge = ctx.input(|i| {
+        if i.viewport().maximized.unwrap_or(false) {
+            return None;
+        }
+        let pos = i.pointer.hover_pos()?;
+        let rect = i.content_rect();
+        let left = pos.x <= rect.left() + 5.0;
+        let right = pos.x >= rect.right() - 5.0;
+        let top = pos.y <= rect.top() + 5.0;
+        let bottom = pos.y >= rect.bottom() - 5.0;
+        let (direction, cursor) = match (left, right, top, bottom) {
+            (true, _, true, _) => (D::NorthWest, CursorIcon::ResizeNwSe),
+            (_, true, true, _) => (D::NorthEast, CursorIcon::ResizeNeSw),
+            (true, _, _, true) => (D::SouthWest, CursorIcon::ResizeNeSw),
+            (_, true, _, true) => (D::SouthEast, CursorIcon::ResizeNwSe),
+            (true, _, _, _) => (D::West, CursorIcon::ResizeHorizontal),
+            (_, true, _, _) => (D::East, CursorIcon::ResizeHorizontal),
+            (_, _, true, _) => (D::North, CursorIcon::ResizeVertical),
+            (_, _, _, true) => (D::South, CursorIcon::ResizeVertical),
+            _ => return None,
+        };
+        Some((direction, cursor, i.pointer.primary_pressed()))
+    });
+    if let Some((direction, cursor, pressed)) = edge {
+        ctx.set_cursor_icon(cursor);
+        if pressed {
+            ctx.send_viewport_cmd(ViewportCommand::BeginResize(direction));
+        }
+    }
+}
+
 pub struct PlanCraftApp {
     ws: SharedWorkspace,
     st: UiState,
@@ -1262,20 +1296,52 @@ impl PlanCraftApp {
             }
         };
         let mut choice = None;
-        egui::Modal::new(egui::Id::new("confirm_close")).show(ctx, |ui| {
-            ui.set_width(380.0);
-            ui.heading(crate::tr("Save changes?"));
-            ui.label(crate::tr_dyn(&format!("Do you want to save changes to {}?", names.join(", "))));
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                if ui.add(egui::Button::new(RichText::new(crate::tr("Save")).color(Color32::WHITE)).fill(theme::pal().ACCENT)).clicked() {
-                    choice = Some(0);
+        let frame = egui::Frame::window(&ctx.style_of(ctx.theme()))
+            .fill(theme::pal().BG)
+            .stroke(Stroke::new(1.0, theme::pal().GRID_LINE))
+            .corner_radius(egui::CornerRadius::same(10))
+            .inner_margin(egui::Margin::same(24));
+        egui::Modal::new(egui::Id::new("confirm_close")).frame(frame).show(ctx, |ui| {
+            ui.set_width(400.0);
+            ui.allocate_ui_with_layout(vec2(400.0, 38.0), Layout::left_to_right(Align::Center), |ui| {
+                let (badge, _) = ui.allocate_exact_size(vec2(38.0, 38.0), Sense::hover());
+                ui.painter().rect_filled(badge, 9.0, theme::pal().ACCENT_PALE);
+                let c = badge.center();
+                let stroke = Stroke::new(1.6, theme::pal().ACCENT_MID);
+                ui.painter().rect_stroke(Rect::from_center_size(c, vec2(17.0, 19.0)), 2.0, stroke, egui::StrokeKind::Inside);
+                ui.painter().line_segment([c + vec2(-5.0, -6.0), c + vec2(5.0, -6.0)], stroke);
+                ui.painter().rect_stroke(
+                    Rect::from_center_size(c + vec2(0.0, 4.0), vec2(10.0, 6.0)),
+                    0.5,
+                    stroke,
+                    egui::StrokeKind::Inside,
+                );
+                ui.add_space(8.0);
+                ui.label(RichText::new(crate::tr("Save changes?")).size(20.0).strong().color(theme::pal().TEXT));
+            });
+            ui.add_space(16.0);
+            ui.label(
+                RichText::new(crate::tr_dyn(&format!("Do you want to save changes to {}?", names.join(", "))))
+                    .size(14.0)
+                    .color(theme::pal().TEXT_WEAK),
+            );
+            ui.add_space(22.0);
+            ui.allocate_ui_with_layout(vec2(400.0, 34.0), Layout::right_to_left(Align::Center), |ui| {
+                ui.spacing_mut().item_spacing.x = 8.0;
+                if ui.add_sized([90.0, 34.0], egui::Button::new(crate::tr("Cancel"))).clicked() {
+                    choice = Some(2);
                 }
-                if ui.button(crate::tr("Don't Save")).clicked() {
+                if ui.add_sized([110.0, 34.0], egui::Button::new(crate::tr("Don't Save"))).clicked() {
                     choice = Some(1);
                 }
-                if ui.button(crate::tr("Cancel")).clicked() {
-                    choice = Some(2);
+                if ui
+                    .add_sized(
+                        [90.0, 34.0],
+                        egui::Button::new(RichText::new(crate::tr("Save")).color(Color32::WHITE)).fill(theme::pal().ACCENT),
+                    )
+                    .clicked()
+                {
+                    choice = Some(0);
                 }
             });
         });
@@ -1523,6 +1589,8 @@ impl PlanCraftApp {
     /// Everything drawn in one frame (run behind the frame guard).
     fn frame(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
+        #[cfg(target_os = "windows")]
+        resize_window_edges(&ctx);
         theme::sync(&ctx);
         self.screenshot_hook(&ctx);
         if std::mem::take(&mut self.inject_panic) {
@@ -1621,7 +1689,7 @@ impl PlanCraftApp {
                 settings: &self.settings,
                 recovered: &self.recovery.found,
             };
-            egui::Panel::top("title").frame(egui::Frame::new().fill(theme::pal().BG)).show(ui, |ui| {
+            egui::Panel::top("title").show_separator_line(false).frame(egui::Frame::new().fill(theme::pal().BG)).show(ui, |ui| {
                 menubar::title_bar(ui, &info, &mut out);
             });
             egui::CentralPanel::no_frame().show(ui, |ui| {

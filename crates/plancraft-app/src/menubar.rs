@@ -79,6 +79,8 @@ pub fn title_bar(ui: &mut Ui, info: &MenuInfo, out: &mut Vec<Command>) {
     let title = if info.has_doc { crate::tr_dyn(&format!("{} - PlanCraft", info.title)) } else { "PlanCraft".into() };
     ui2.painter().text(rect.center(), Align2::CENTER_CENTER, title, FontId::proportional(13.0), Color32::WHITE);
     ui2.with_layout(Layout::right_to_left(Align::Center), |ui| {
+        #[cfg(target_os = "windows")]
+        window_buttons(ui);
         let (txt, color) = if info.mcp_running {
             (crate::tr("⚡ MCP live"), Color32::from_rgb(0x8E, 0xF0, 0xB0))
         } else {
@@ -93,7 +95,48 @@ pub fn title_bar(ui: &mut Ui, info: &MenuInfo, out: &mut Vec<Command>) {
             out.push(Command::McpPanel);
         }
     });
+    #[cfg(target_os = "windows")]
+    {
+        // Only the empty middle of the band moves the window; controls keep their own clicks.
+        let drag_rect = Rect::from_min_max(
+            pos2(rect.left() + 220.0, rect.top() + 6.0),
+            pos2((rect.right() - 250.0).max(rect.left() + 220.0), rect.bottom()),
+        );
+        let (pressed, double_clicked) = ui.input(|i| {
+            let inside = i.pointer.interact_pos().is_some_and(|pos| drag_rect.contains(pos));
+            (inside && i.pointer.primary_pressed(), inside && i.pointer.button_double_clicked(egui::PointerButton::Primary))
+        });
+        if double_clicked {
+            let maximized = ui.input(|i| i.viewport().maximized.unwrap_or(false));
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
+        } else if pressed {
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
+        }
+    }
+    let spacing = ui.spacing().item_spacing.y;
+    ui.spacing_mut().item_spacing.y = 0.0;
     ui.allocate_rect(rect, Sense::hover());
+    ui.spacing_mut().item_spacing.y = spacing;
+}
+
+#[cfg(target_os = "windows")]
+fn window_buttons(ui: &mut Ui) {
+    let maximized = ui.input(|i| i.viewport().maximized.unwrap_or(false));
+    for (label, tip, command) in [
+        ("×", "Close", egui::ViewportCommand::Close),
+        (if maximized { "❐" } else { "□" }, if maximized { "Restore" } else { "Maximize" }, egui::ViewportCommand::Maximized(!maximized)),
+        ("−", "Minimize", egui::ViewportCommand::Minimized(true)),
+    ] {
+        let (rect, response) = ui.allocate_exact_size(vec2(42.0, 34.0), Sense::click());
+        if response.hovered() {
+            ui.painter().rect_filled(rect, 0.0, Color32::from_white_alpha(35));
+        }
+        ui.painter().text(rect.center(), Align2::CENTER_CENTER, label, FontId::proportional(18.0), Color32::WHITE);
+        if response.on_hover_text(crate::tr(tip)).clicked() {
+            ui.ctx().send_viewport_cmd(command);
+        }
+    }
+    ui.add_space(8.0);
 }
 
 // ---------------------------------------------------------------------------
@@ -136,7 +179,22 @@ fn big(ui: &mut Ui, icon: &str, label: &str, tip: &str, enabled: bool, active: b
     let (rect, resp) = ui.allocate_exact_size(vec2(w, BODY_H), if enabled { Sense::click() } else { Sense::hover() });
     hover_fill(ui, rect, enabled && resp.hovered(), active);
     let p = ui.painter();
-    p.text(pos2(rect.center().x, rect.top() + 18.0), Align2::CENTER_CENTER, icon, FontId::proportional(24.0), icon_color(enabled));
+    if icon == "printer" {
+        let c = pos2(rect.center().x, rect.top() + 18.0);
+        let stroke = Stroke::new(1.6, icon_color(enabled));
+        p.rect_stroke(Rect::from_min_max(c + vec2(-7.0, -12.0), c + vec2(7.0, -5.0)), 0.5, stroke, StrokeKind::Inside);
+        p.line_segment([c + vec2(-11.0, 6.0), c + vec2(-11.0, -5.0)], stroke);
+        p.line_segment([c + vec2(-11.0, -5.0), c + vec2(11.0, -5.0)], stroke);
+        p.line_segment([c + vec2(11.0, -5.0), c + vec2(11.0, 6.0)], stroke);
+        p.line_segment([c + vec2(-11.0, 6.0), c + vec2(-7.0, 6.0)], stroke);
+        p.line_segment([c + vec2(7.0, 6.0), c + vec2(11.0, 6.0)], stroke);
+        p.rect_stroke(Rect::from_min_max(c + vec2(-7.0, 1.0), c + vec2(7.0, 10.0)), 0.5, stroke, StrokeKind::Inside);
+        p.line_segment([c + vec2(-4.0, 4.0), c + vec2(4.0, 4.0)], stroke);
+        p.line_segment([c + vec2(-4.0, 7.0), c + vec2(4.0, 7.0)], stroke);
+        p.circle_filled(c + vec2(7.0, -2.0), 1.0, icon_color(enabled));
+    } else {
+        p.text(pos2(rect.center().x, rect.top() + 18.0), Align2::CENTER_CENTER, icon, FontId::proportional(24.0), icon_color(enabled));
+    }
     let gp = pos2(rect.center().x - galley.size().x / 2.0, rect.top() + 36.0);
     // Center every line of the label.
     let lines = galley.rows.len();
@@ -542,7 +600,7 @@ fn ribbon(ui: &mut Ui, st: &mut UiState, info: &MenuInfo, settings: &AppSettings
                 });
             });
             group(ui, crate::tr("Export"), |ui| {
-                bg(ui, "PRN", crate::tr("Print Gantt…"), crate::tr("Preview and print the Gantt chart"), doc, Command::PrintGantt);
+                bg(ui, "printer", crate::tr("Print Gantt…"), crate::tr("Preview and print the Gantt chart"), doc, Command::PrintGantt);
                 bg(ui, "🗐", crate::tr("Export CSV"), crate::tr("Export the task list as CSV"), doc, Command::ExportCsv);
                 bg(ui, "📤", crate::tr("Export to MS Project XML…"), "", doc, Command::ExportXml);
             });

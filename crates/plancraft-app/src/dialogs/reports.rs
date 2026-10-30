@@ -712,7 +712,7 @@ impl ReportsWindow {
     pub fn show(&mut self, ctx: &Context, doc: &Document) -> bool {
         let mut open = true;
         let p = &doc.project;
-        egui::Window::new(crate::tr("Reports"))
+        super::window(ctx, crate::tr("Reports"))
             .id(egui::Id::new("reports_window"))
             .pivot(egui::Align2::CENTER_TOP)
             .default_pos(ctx.content_rect().center_top() + egui::vec2(0.0, 90.0))
