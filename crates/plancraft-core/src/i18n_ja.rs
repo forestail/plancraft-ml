@@ -406,6 +406,14 @@ pub fn translate(s: &str) -> Option<&'static str> {
         "Agents edit the documents open here. Changes appear immediately and can be undone like your own edits (marked ⚡ in the undo history)." => {
             "エージェントはここで開いているドキュメントを編集します。変更はすぐに反映され、通常の編集と同様に元に戻せます（元に戻す履歴では ⚡ で表示）。"
         }
+        "Codex" => "Codex",
+        "GitHub Copilot (VS Code / CLI)" => "GitHub Copilot (VS Code / CLI)",
+        "Run in a terminal, then restart Codex. Use `codex mcp list` to check the registration. Start the PlanCraft server and ask Codex to use the plancraft MCP tools." => {
+            "ターミナルで登録コマンドを実行してから Codex を再起動します。`codex mcp list` で登録を確認できます。PlanCraft サーバーを起動し、Codex に plancraft MCP ツールを使うよう依頼してください。"
+        }
+        "Add this JSON to ~/.copilot/mcp-config.json (merge mcpServers if the file already exists). In VS Code, select the Copilot agent and enable the server in Chat: Open Customizations > MCP Servers. Restart the agent, start the PlanCraft server, and ask it to use the plancraft MCP tools." => {
+            "この JSON を ~/.copilot/mcp-config.json に追加します（ファイルがある場合は mcpServers に統合してください）。VS Code では Copilot エージェントを選び、Chat: Open Customizations > MCP Servers でサーバーを有効にします。エージェントを再起動し、PlanCraft サーバーを起動して、plancraft MCP ツールを使うよう依頼してください。"
+        }
         "Claude Code (recommended)" => "Claude Code (推奨)",
         "Clients must send this bearer token. It changes each time the server starts." => {
             "クライアントはこのベアラー トークンを送信する必要があります。トークンはサーバーの起動ごとに変わります。"
