@@ -920,6 +920,16 @@ pub static RU: &[(&str, &str)] = &[
     ("⚡ running", "⚡ работает"),
     ("▶ Start server", "▶ Запустить сервер"),
     ("Start automatically", "Запускать автоматически"),
+    ("Codex", "Codex"),
+    ("GitHub Copilot (VS Code / CLI)", "GitHub Copilot (VS Code / CLI)"),
+    (
+        "Run in a terminal, then restart Codex. Use `codex mcp list` to check the registration. Start the PlanCraft server and ask Codex to use the plancraft MCP tools.",
+        "Выполните команду в терминале и перезапустите Codex. Проверьте регистрацию командой `codex mcp list`. Запустите сервер PlanCraft и попросите Codex использовать инструменты plancraft MCP.",
+    ),
+    (
+        "Add this JSON to ~/.copilot/mcp-config.json (merge mcpServers if the file already exists). In VS Code, select the Copilot agent and enable the server in Chat: Open Customizations > MCP Servers. Restart the agent, start the PlanCraft server, and ask it to use the plancraft MCP tools.",
+        "Добавьте этот JSON в ~/.copilot/mcp-config.json (если файл существует, объедините с mcpServers). В VS Code выберите агент Copilot и включите сервер в Chat: Open Customizations > MCP Servers. Перезапустите агент, запустите сервер PlanCraft и попросите использовать инструменты plancraft MCP.",
+    ),
     ("Claude Code (recommended)", "Claude Code (рекомендуется)"),
     (
         "Add it once: it connects to this window whenever the server is running, even after PlanCraft restarts.",

@@ -74,7 +74,7 @@ pub fn show(
             ui.colored_label(theme::pal().ERROR, e);
         }
         let exe = exe();
-        heading(ui, crate::tr("Claude Code (recommended)"));
+        heading(ui, crate::tr("Claude Code"));
         let attach = format!("claude mcp add plancraft -- {exe} mcp --attach");
         code_line(ui, &attach, &attach);
         ui.label(
@@ -82,6 +82,15 @@ pub fn show(
                 .small()
                 .color(theme::pal().TEXT_WEAK),
         );
+        heading(ui, "Codex");
+        let codex = format!("codex mcp add plancraft -- {exe} mcp --attach");
+        code_line(ui, &codex, &codex);
+        ui.label(RichText::new(crate::tr("Run in a terminal, then restart Codex. Use `codex mcp list` to check the registration. Start the PlanCraft server and ask Codex to use the plancraft MCP tools.")).small().color(theme::pal().TEXT_WEAK));
+        heading(ui, "GitHub Copilot (VS Code / CLI)");
+        let executable = std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_else(|_| "plancraft".into());
+        let config = serde_json::json!({"mcpServers": {"plancraft": {"type": "stdio", "command": executable, "args": ["mcp", "--attach"]}}}).to_string();
+        code_line(ui, &config, &config);
+        ui.label(RichText::new(crate::tr("Add this JSON to ~/.copilot/mcp-config.json (merge mcpServers if the file already exists). In VS Code, select the Copilot agent and enable the server in Chat: Open Customizations > MCP Servers. Restart the agent, start the PlanCraft server, and ask it to use the plancraft MCP tools.")).small().color(theme::pal().TEXT_WEAK));
         if let (Some(url), Some(token)) = (host.url(), host.token()) {
             heading(ui, crate::tr("Other HTTP MCP clients"));
             code_line(ui, &url, &url);
