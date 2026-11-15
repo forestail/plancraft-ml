@@ -20,11 +20,16 @@ pub enum Command {
     ExportCsv,
     Import,
     ExportXml,
-    PrintGantt,
     Templates,
     SaveTemplate,
     NewFromTemplate(plancraft_core::templates::Template),
     NewFromTemplateFile(std::path::PathBuf),
+    /// The Print window (preview, page setup, print, save as PDF).
+    Print,
+    /// Save the current view as a PDF with the plan's page setup.
+    ExportPdf,
+    /// Save the plan as a Microsoft Project XML (MSPDI) file.
+    ExportMspdi,
     Quit,
     StartPage,
     /// Restore a recovery copy (by its stem in the recovery folder).
@@ -35,6 +40,11 @@ pub enum Command {
     InsertTask,
     InsertMilestone,
     InsertSummary,
+    /// The Recurring Task window, for a new recurring task.
+    /// Split Task: the next click on a Gantt bar splits that task.
+    SplitTask,
+    /// Remove the splits planned in the selected tasks.
+    RejoinTasks,
     DeleteSelection,
     Indent,
     Outdent,
@@ -72,6 +82,8 @@ pub enum Command {
     Reports,
     CustomReport,
     SortResources(plancraft_core::extras::SortKey),
+    SetBaseline,
+    ClearBaseline,
     UpdateProgressFromTime,
     ExternalLinks,
     RefreshExternal,
@@ -85,6 +97,23 @@ pub enum Command {
     ZoomSelected,
     Filter(TaskFilter),
     Table(TaskTable),
+    /// Sort task views by a field key (`true` = descending); `None` restores the outline order.
+    SortBy(Option<(String, bool)>),
+    /// Group task views by a field key; `None` ungroups.
+    GroupBy(Option<String>),
+    /// Insert a column showing field `key` before column `at` of the current table.
+    InsertColumn {
+        at: usize,
+        key: String,
+    },
+    HideColumn(usize),
+    MoveColumn {
+        at: usize,
+        right: bool,
+    },
+    /// Back to the current table's default columns.
+    ResetColumns,
+    CustomFields,
     CollapseAll,
     ExpandAll,
     History,
@@ -121,6 +150,8 @@ pub fn task_context_menu(ui: &mut egui::Ui, emit: &mut dyn FnMut(Command)) {
     item(ui, crate::tr("✔  Mark 100% Complete"), Command::SetPercent(100));
     item(ui, crate::tr("📅  Add to Timeline"), Command::ToggleTimeline);
     item(ui, crate::tr("⏸  Inactivate / Activate"), Command::ToggleActive);
+    item(ui, &format!("➗  {}", crate::tr("Split Task")), Command::SplitTask);
+    item(ui, &format!("⟲  {}", crate::tr("Rejoin Split Task")), Command::RejoinTasks);
     ui.separator();
     item(ui, crate::tr("✂  Cut"), Command::Cut);
     item(ui, crate::tr("📋  Copy"), Command::Copy);
